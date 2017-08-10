@@ -20,7 +20,7 @@ from setuptools import setup
 
 setup(
     name = 'nvmetcli',
-    version = 0.4,
+    version = 0.5,
     description = 'NVMe target configuration tool',
     license = 'Apache 2.0',
     maintainer = 'Christoph Hellwig',
