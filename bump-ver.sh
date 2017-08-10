@@ -14,6 +14,7 @@ if [ -z "$VER" ]; then
    exit 1
 fi
 
+make clean
 sed -i "s/version =.*,/version = $VER,/" setup.py
 git add setup.py
 git commit -m "bump version to v$VER"
