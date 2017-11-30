@@ -356,11 +356,6 @@ class UIPortNode(UINode):
         UIPortSubsystemsNode(self)
         UIReferralsNode(self)
 
-    def status(self):
-        if self.cfnode.get_enable():
-            return "enabled"
-        return "disabled"
-
 
 class UIPortSubsystemsNode(UINode):
     def __init__(self, parent):
