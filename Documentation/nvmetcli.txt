@@ -105,6 +105,7 @@ and not enter the interactive configuration shell.
                             Without specifying the filename this will use
                             */etc/nvmet/config.json*.
 | clear                   | Clears a current NVMe Target configuration.
+| ls                      | Dumps the current NVMe Target configuration.
 |==================
 
 EXAMPLES

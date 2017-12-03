@@ -549,6 +549,7 @@ def usage():
     print("syntax: %s save [file_to_save_to]" % sys.argv[0])
     print("        %s restore [file_to_restore_from]" % sys.argv[0])
     print("        %s clear" % sys.argv[0])
+    print("        %s ls" % sys.argv[0])
     sys.exit(-1)
 
 
@@ -572,7 +573,14 @@ def clear(unused):
     nvme.Root().clear_existing()
 
 
-funcs = dict(save=save, restore=restore, clear=clear)
+def ls(unused):
+    shell = configshell.shell.ConfigShell('~/.nvmetcli')
+    UIRootNode(shell)
+    shell.run_cmdline("ls")
+    sys.exit(0)
+
+
+funcs = dict(save=save, restore=restore, clear=clear, ls=ls)
 
 
 def main():
