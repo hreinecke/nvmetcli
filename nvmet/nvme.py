@@ -618,6 +618,19 @@ class Port(CFSNode):
 
     portid = property(_get_portid, doc="Get the Port ID as an int.")
 
+    def _get_state(self):
+        self._check_self()
+        _state = None
+        path = "%s/trstate" % self.path
+        if not os.path.isfile(path):
+            return None
+
+        with open(path, 'r') as file_fd:
+            _state = file_fd.read().strip()
+        return _state
+
+    state = property(_get_state, doc="Get the Port state.")
+
     def _list_subsystems(self):
         return [os.path.basename(name)
                 for name in os.listdir("%s/subsystems/" % self._path)]
