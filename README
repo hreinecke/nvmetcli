@@ -14,9 +14,11 @@ using setup.py.
 
 Common Package Dependencies and Problems
 -----------------------------------------
-nvmetcli uses the 'python-six' and 'pyparsing' packages
-(running nvmetcli without these packages may produce
-hard-to-decipher errors).
+Both python2 and python3 are supported via use of the 'python-six'
+package.
+
+nvmetcli uses the 'pyparsing' package -- running nvmetcli without this
+package may produce hard-to-decipher errors.
 
 Usage
 -----

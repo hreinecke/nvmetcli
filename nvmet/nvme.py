@@ -23,6 +23,7 @@ import stat
 import uuid
 import json
 from glob import iglob as glob
+from six import iteritems
 
 DEFAULT_SAVE_FILE = '/etc/nvmet/config.json'
 
@@ -219,7 +220,7 @@ class CFSNode(object):
 
     def _setup_attrs(self, attr_dict, err_func):
         for group in self.attr_groups:
-            for name, value in attr_dict.get(group, {}).iteritems():
+            for name, value in iteritems(attr_dict.get(group, {})):
                 try:
                     self.set_attr(group, name, value)
                 except CFSError as e:
