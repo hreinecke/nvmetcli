@@ -388,14 +388,7 @@ class UIPortNode(UINode):
         if trsvcid != "none":
             info.append("trsvcid=%s" % trsvcid)
         enabled = not (not self.cfnode.subsystems and not list(self.cfnode.referrals))
-        info.append("status=" + ("enabled" if enabled else "disabled"))
-        if not enabled:
-            ret = 0
-        else:
-            trstate = self.cfnode.state
-            info.append("state=" + trstate)
-            ret = True if trstate == "up" else False
-        return (", ".join(info), ret)
+        return (", ".join(info), True if enabled else 0)
 
 class UIPortSubsystemsNode(UINode):
     def __init__(self, parent):
