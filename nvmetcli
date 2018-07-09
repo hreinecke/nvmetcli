@@ -374,6 +374,9 @@ class UIPortNode(UINode):
         'trsvcid': ('string', 'Transport Service ID (e.g. IP Port)'),
         'trtype': ('string', 'Transport Type (e.g. rdma or loop or fc)'),
     }
+    ui_desc_param = {
+        'inline_data_size': ('string', 'Port inline data size in bytes'),
+    }
 
     def __init__(self, parent, cfnode):
         UINode.__init__(self, str(cfnode.portid), parent, cfnode)
@@ -387,6 +390,16 @@ class UIPortNode(UINode):
         trsvcid = self.cfnode.get_attr("addr", "trsvcid")
         if trsvcid != "none":
             info.append("trsvcid=%s" % trsvcid)
+
+	'''
+	Support older target driver w/o the inline_data_size parameter
+	'''
+	try:
+		inline_data_size = self.cfnode.get_attr("param", "inline_data_size")
+	except:
+		inline_data_size = "n/a"
+	if inline_data_size != "n/a":
+		info.append("inline_data_size=" + inline_data_size);
         enabled = not (not self.cfnode.subsystems and not list(self.cfnode.referrals))
         return (", ".join(info), True if enabled else 0)
 

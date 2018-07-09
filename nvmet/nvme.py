@@ -609,7 +609,7 @@ class Port(CFSNode):
     def __init__(self, portid, mode='any'):
         super(Port, self).__init__()
 
-        self.attr_groups = ['addr']
+        self.attr_groups = ['addr', 'param']
         self._portid = int(portid)
         self._path = "%s/ports/%d" % (self.configfs_dir, self._portid)
         self._create_in_cfs(mode)
