@@ -404,7 +404,7 @@ class UIPortNode(UINode):
             inline_data_size = "n/a"
         if inline_data_size != "n/a":
             info.append("inline_data_size=" + inline_data_size)
-        enabled = not (not self.cfnode.subsystems and not list(self.cfnode.referrals))
+        enabled = self.cfnode.subsystems or list(self.cfnode.referrals)
         return (", ".join(info), True if enabled else 0)
 
 
