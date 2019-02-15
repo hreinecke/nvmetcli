@@ -261,6 +261,16 @@ class UINamespaceNode(UINode):
                 raise configshell.ExecutionError(
                     "The Namespace could not be disabled.")
 
+    def ui_command_grpid(self, grpid):
+        '''
+        Sets the ANA Group ID of the current Namespace to I{grpid}
+        '''
+        try:
+            self.cfnode.set_grpid(grpid)
+        except Exception as e:
+            raise configshell.ExecutionError(
+                "Failed to set ANA Group ID for this Namespace.")
+
     def summary(self):
         info = []
         info.append("path=" + self.cfnode.get_attr("device", "path"))
@@ -270,6 +280,8 @@ class UINamespaceNode(UINode):
         ns_nguid = self.cfnode.get_attr("device", "nguid")
         if ngiud_set(ns_nguid):
             info.append("nguid=" + ns_nguid)
+        if self.cfnode.grpid != 0:
+            info.append("grpid=" + str(self.cfnode.grpid))
         info.append("enabled" if self.cfnode.get_enable() else "disabled")
         ns_enabled = self.cfnode.get_enable()
         return (", ".join(info), True if ns_enabled == 1 else ns_enabled)
@@ -385,6 +397,12 @@ class UIPortNode(UINode):
     def __init__(self, parent, cfnode):
         UINode.__init__(self, str(cfnode.portid), parent, cfnode)
         UIPortSubsystemsNode(self)
+        try:
+            next(cfnode.ana_groups)
+        except StopIteration:
+            pass
+        else:
+            UIANAGroupsNode(self)
         UIReferralsNode(self)
 
     def summary(self):
@@ -557,6 +575,52 @@ class UIReferralNode(UINode):
                 raise configshell.ExecutionError(
                     "The Referral could not be disabled.")
 
+
+class UIANAGroupsNode(UINode):
+    def __init__(self, parent):
+        UINode.__init__(self, 'ana_groups', parent)
+
+    def refresh(self):
+        self._children = set([])
+        for a in self.parent.cfnode.ana_groups:
+            UIANAGroupNode(self, a)
+
+    def ui_command_create(self, grpid):
+        '''
+        Creates a new ANA Group.
+
+        SEE ALSO
+        ========
+        B{delete}
+        '''
+        a = nvme.ANAGroup(self.parent.cfnode, grpid, mode='create')
+        UIANAGroupNode(self, a)
+
+    def ui_command_delete(self, grpid):
+        '''
+        Deletes the ANA Group with the specified I{name}.
+
+        SEE ALSO
+        ========
+        B{create}
+        '''
+        a = nvme.ANAGroup(self.parent.cfnode, grpid, mode='lookup')
+        a.delete()
+        self.refresh()
+
+
+class UIANAGroupNode(UINode):
+    ui_desc_ana = {
+        'state' : ('string', 'ANA state'),
+    }
+
+    def __init__(self, parent, cfnode):
+        UINode.__init__(self, str(cfnode.grpid), parent, cfnode)
+
+    def summary(self):
+        info = []
+        info.append("state=" + self.cfnode.get_attr("ana", "state"))
+        return (", ".join(info), True)
 
 class UIHostsNode(UINode):
     def __init__(self, parent):
