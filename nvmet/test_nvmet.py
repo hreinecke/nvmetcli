@@ -391,7 +391,7 @@ class TestNvmet(unittest.TestCase):
                           nqn='/', mode='create')
 
         for l in [ 257, 512, 1024, 2048 ]:
-            toolong = ''.join(random.choice(string.lowercase)
+            toolong = ''.join(random.choice(string.ascii_lowercase)
                               for i in range(l))
             self.assertRaises(nvme.CFSError, nvme.Subsystem,
                               nqn=toolong, mode='create')
