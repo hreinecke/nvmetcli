@@ -680,6 +680,9 @@ def restore(from_file):
     try:
         errors = nvme.Root().restore_from_file(from_file)
     except IOError as e:
+        if not from_file:
+            from_file = nvme.DEFAULT_SAVE_FILE
+
         if e.errno == errno.ENOENT:
             # Not an error if the restore file is not present
             print("No saved config file at %s, ok, exiting" % from_file)
