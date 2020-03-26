@@ -302,7 +302,6 @@ class Root(CFSNode):
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
-            f.close()
 
         os.rename(savefile + ".temp", savefile)
 
