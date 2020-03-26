@@ -24,6 +24,7 @@ import os
 import sys
 import configshell_fb as configshell
 import nvmet as nvme
+import errno
 from string import hexdigits
 import uuid
 
@@ -674,15 +675,25 @@ def save(to_file):
 
 
 def restore(from_file):
+    errors = None
+
     try:
         errors = nvme.Root().restore_from_file(from_file)
-    except IOError:
-        # Not an error if the restore file is not present
-        print("No saved config file at %s, ok, exiting" % from_file)
-    sys.exit(0)
+    except IOError as e:
+        if e.errno == errno.ENOENT:
+            # Not an error if the restore file is not present
+            print("No saved config file at %s, ok, exiting" % from_file)
+            sys.exit(0)
+        else:
+            print("Error processing config file at %s, error %s, exiting" %
+                  (from_file, str(e)))
+            sys.exit(1)
 
+    # These errors are non-fatal
     for error in errors:
         print(error)
+
+    sys.exit(0)
 
 
 def clear(unused):
