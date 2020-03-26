@@ -7,7 +7,7 @@ to save, restore or clear the current NVMe target configuration.
 Installation
 ------------
 Please install the configshell-fb package from
-https://github.com/agrover/configshell-fb first.
+https://github.com/open-iscsi/configshell-fb first.
 
 nvmetcli can be run directly from the source directory or installed
 using setup.py.
