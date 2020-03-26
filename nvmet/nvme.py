@@ -253,7 +253,12 @@ class Root(CFSNode):
             except kmod.KmodError:
                 pass
         except ImportError:
-            pass
+            # Try the ctypes library included with the libkmod itself.
+            try:
+                import kmod
+                kmod.Kmod().modprobe(modname)
+            except Exception as e:
+                pass
 
     def _list_subsystems(self):
         self._check_self()
