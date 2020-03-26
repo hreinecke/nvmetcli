@@ -305,6 +305,15 @@ class Root(CFSNode):
 
         os.rename(savefile + ".temp", savefile)
 
+        # Sync the containing directory too
+        dir_fd = None
+        try:
+            dir_fd = os.open(savefile_dir, os.O_RDONLY)
+            os.fsync(dir_fd)
+        finally:
+            if dir_fd:
+                os.close(dir_fd)
+
     def clear_existing(self):
         '''
         Remove entire current configuration.
