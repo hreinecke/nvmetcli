@@ -845,6 +845,11 @@ class ANAGroup(CFSNode):
 
         a._setup_attrs(n, err_func)
 
+    def delete(self):
+        # ANA Group 1 is automatically created/deleted
+        if self.grpid != 1:
+            super(ANAGroup, self).delete()
+
     def dump(self):
         d = super(ANAGroup, self).dump()
         d['grpid'] = self.grpid
