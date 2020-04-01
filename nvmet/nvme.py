@@ -23,7 +23,7 @@ import stat
 import uuid
 import json
 from glob import iglob as glob
-from six import iteritems
+from six import iteritems, moves
 
 DEFAULT_SAVE_FILE = '/etc/nvmet/config.json'
 
@@ -556,7 +556,7 @@ class Namespace(CFSNode):
                 raise CFSError("Need NSID for lookup")
 
             nsids = [n.nsid for n in subsystem.namespaces]
-            for index in xrange(1, self.MAX_NSID + 1):
+            for index in moves.xrange(1, self.MAX_NSID + 1):
                 if index not in nsids:
                     nsid = index
                     break
@@ -816,7 +816,7 @@ class ANAGroup(CFSNode):
                 raise CFSError("Need grpid for lookup")
 
             grpids = [n.grpid for n in port.ana_groups]
-            for index in xrange(2, self.MAX_GRPID + 1):
+            for index in moves.xrange(2, self.MAX_GRPID + 1):
                 if index not in grpids:
                     grpid = index
                     break
