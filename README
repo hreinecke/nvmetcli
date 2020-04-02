@@ -47,7 +47,10 @@ Testing
 -------
 nvmetcli comes with a testsuite that tests itself and the kernel configfs
 interface for the NVMe target.  To run it make sure you have nose2 and
-the coverage plugin for it installed and simple run 'make test'.
+the coverage plugin for it installed and simple run 'make test'.  To run all
+the tests you also need some test block devices or files.  Default is to
+use /dev/ram0 and /dev/ram1.  You can override default with environmental
+variable eg. NVMET_TEST_DEVICES="/dev/sdk,/dev/sdj" make test .
 
 Development
 -----------------

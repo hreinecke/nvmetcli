@@ -1,8 +1,21 @@
 
+import os
 import random
+import stat
 import string
 import unittest
 import nvmet.nvme as nvme
+
+# Default test devices are ram disks, but allow user to specify different
+# block devices or files.
+NVMET_TEST_DEVICES = os.getenv("NVMET_TEST_DEVICES",
+                               "/dev/ram0,/dev/ram1").split(',')
+
+
+def test_devices_present():
+    return len([x for x in NVMET_TEST_DEVICES
+                if os.path.exists(x) and
+                (stat.S_ISBLK(os.stat(x).st_mode) or os.path.isfile(x))]) >= 2
 
 
 class TestNvmet(unittest.TestCase):
@@ -101,6 +114,8 @@ class TestNvmet(unittest.TestCase):
             n.delete()
         self.assertEqual(len(list(s.namespaces)), 0)
 
+    @unittest.skipUnless(test_devices_present(),
+                         "Devices %s not available or suitable" % ','.join(NVMET_TEST_DEVICES))
     def test_namespace_attrs(self):
         root = nvme.Root()
         root.clear_existing()
@@ -116,7 +131,7 @@ class TestNvmet(unittest.TestCase):
         self.assertRaises(nvme.CFSError, n.set_enable, 1)
 
         # now set a path and enable
-        n.set_attr('device', 'path', '/dev/ram0')
+        n.set_attr('device', 'path', NVMET_TEST_DEVICES[0])
         n.set_enable(1)
         self.assertTrue(n.get_enable())
 
@@ -125,7 +140,7 @@ class TestNvmet(unittest.TestCase):
 
         # test that we can't write to attrs while enabled
         self.assertRaises(nvme.CFSError, n.set_attr, 'device', 'path',
-                          '/dev/ram1')
+                          NVMET_TEST_DEVICES[1])
         self.assertRaises(nvme.CFSError, n.set_attr, 'device', 'nguid',
                           '15f7767b-50e7-4441-949c-75b99153dea7')
 
@@ -403,6 +418,9 @@ class TestNvmet(unittest.TestCase):
         self.assertRaises(nvme.CFSError, nvme.Port,
                           portid=1 << 17, mode='create')
 
+    @unittest.skipUnless(test_devices_present(),
+                         "Devices %s not available or suitable" % ','.join(
+                             NVMET_TEST_DEVICES))
     def test_save_restore(self):
         root = nvme.Root()
         root.clear_existing()
@@ -416,7 +434,7 @@ class TestNvmet(unittest.TestCase):
         s2.set_attr('attr', 'allow_any_host', 1)
 
         n = nvme.Namespace(s, nsid=42, mode='create')
-        n.set_attr('device', 'path', '/dev/ram0')
+        n.set_attr('device', 'path', NVMET_TEST_DEVICES[0])
         n.set_enable(1)
 
         nguid = n.get_attr('device', 'nguid')
@@ -454,7 +472,7 @@ class TestNvmet(unittest.TestCase):
 
         # and check everything is still the same
         self.assertTrue(n.get_enable())
-        self.assertEqual(n.get_attr('device', 'path'), '/dev/ram0')
+        self.assertEqual(n.get_attr('device', 'path'), NVMET_TEST_DEVICES[0])
         self.assertEqual(n.get_attr('device', 'nguid'), nguid)
 
         self.assertEqual(p.get_attr('addr', 'trtype'), 'loop')
