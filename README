@@ -41,6 +41,11 @@ fc.json fits your setup:
 
   ./nvmetcli restore fc.json
 
+Or to load the tcp + no host authentication version do the following
+after you've ensured that the IP address in tcp.json fits your setup:
+
+  ./nvmetcli restore tcp.json
+
 These files can also be edited directly using your favorite editor.
 
 Testing

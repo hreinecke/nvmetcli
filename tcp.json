@@ -1,0 +1,58 @@
+{
+  "hosts": [], 
+  "ports": [
+    {
+      "addr": {
+        "adrfam": "ipv4", 
+        "traddr": "192.168.122.33", 
+        "treq": "not specified", 
+        "trsvcid": "4420", 
+        "trtype": "tcp"
+      }, 
+      "ana_groups": [
+        {
+          "ana": {
+            "state": "optimized"
+          }, 
+          "grpid": 1
+        }
+      ], 
+      "param": {
+        "inline_data_size": "16384", 
+        "pi_enable": "0"
+      }, 
+      "portid": 1, 
+      "referrals": [], 
+      "subsystems": [
+        "nvmet-always"
+      ]
+    }
+  ], 
+  "subsystems": [
+    {
+      "allowed_hosts": [], 
+      "attr": {
+        "allow_any_host": "1", 
+        "cntlid_max": "65519", 
+        "cntlid_min": "1", 
+        "model": "Linux", 
+        "pi_enable": "0", 
+        "serial": "123456789abcdef", 
+        "version": "1.3"
+      }, 
+      "namespaces": [
+        {
+          "ana_grpid": 1, 
+          "device": {
+            "nguid": "00000000-0000-0000-0000-000000000000", 
+            "path": "/dev/nvme0n1", 
+            "uuid": "d592cdf3-5d1c-44e0-8412-3fcf7d99df27"
+          }, 
+          "enable": 1, 
+          "nsid": 1
+        }
+      ], 
+      "nqn": "nvmet-always"
+    }
+  ]
+}
