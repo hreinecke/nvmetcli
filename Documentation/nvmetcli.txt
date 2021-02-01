@@ -116,7 +116,7 @@ your devices and all dependent modules are loaded,
 and configfs is mounted on /sys/kernel/config
 using:
 
-	mount -t configs none /sys/kernel/config
+	mount -t configfs none /sys/kernel/config
 
 The following section walks through a configuration example.
 
