@@ -567,7 +567,7 @@ class Namespace(CFSNode):
             if nsid < 1 or nsid > self.MAX_NSID:
                 raise CFSError("NSID must be 1 to %d" % self.MAX_NSID)
 
-        self.attr_groups = ['device']
+        self.attr_groups = ['device', 'ana']
         self._subsystem = subsystem
         self._nsid = nsid
         self._path = "%s/namespaces/%d" % (self.subsystem.path, self.nsid)
