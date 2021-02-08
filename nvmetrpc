@@ -1,0 +1,111 @@
+#!/usr/bin/python
+
+'''
+Simple json-rpc daemon, compatible with SPDK rpc
+
+Copyright (c) 2021 by Hannes Reinecke, SUSE Linux LLC
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this file except in compliance with the License. You may obtain
+a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
+'''
+
+from __future__ import print_function
+
+import os
+import sys
+import json
+import socket
+import nvmet as nvme
+
+class JSONRPC:
+    def _get_subsystems(self):
+        return [s.dump() for s in self.cfg.subsystems]
+
+    _rpc_methods = dict(nvmf_get_subsystems=_get_subsystems,
+                        get_nvmf_subsystems=_get_subsystems)
+
+    def __init__(self, sockname):
+        self.cfg = nvme.Root()
+        self.sockname = sockname
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self.sock.bind(self.sockname)
+        except OSError:
+            print("cannot bind to %s" % self.sockname)
+            return None
+        self.sock.listen(10)
+
+    def __enter__(self):
+        return self
+
+    def rpc_server(self):
+        while True:
+            buf = ''
+            closed = False
+            response = None
+            (client, address) = self.sock.accept()
+            while not closed:
+                newdata = client.recv(1024)
+                if (newdata == b''):
+                    closed = True
+                buf += newdata.decode('ascii')
+                try:
+                    req = json.loads(buf)
+                except ValueError:
+                    continue
+                response = self.rpc_call(req)
+                client.sendall(response.encode('ascii'))
+                client.close()
+                closed = True
+
+    def rpc_call(self, req):
+        print ("%s" % req)
+        method = req['method']
+        id = req['id']
+        if method not in self._rpc_methods.keys():
+            error = dict(code=-32601,message='Method not found')
+            resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
+        else:
+            result = self._rpc_methods[method](self)
+            resp = json.dumps(dict(result=result, id=id, jsonrpc="2.0"))
+        print ("%s" % resp)
+        return resp
+
+    def rpc_shutdown(self):
+        self.sock.close()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        os.remove(self.sockname)
+
+def main():
+    sockname = '/var/tmp/spdk.sock'
+    if os.geteuid() != 0:
+       print("%s: must run as root." % sys.argv[0], file=sys.stderr)
+       sys.exit(-1)
+
+    if len(sys.argv) > 2:
+        usage()
+
+    if len(sys.argv) == 2:
+        sockname = sys.argv[1]
+
+    with JSONRPC(sockname) as s:
+        try:
+            print('Started RPC http proxy server')
+            s.rpc_server()
+        except KeyboardInterrupt:
+            print('Shutting down server')
+            s.rpc_shutdown()
+
+if __name__ == '__main__':
+    main()
