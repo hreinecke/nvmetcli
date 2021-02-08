@@ -57,6 +57,7 @@ class BlockDevice:
                 self.uuid_path = os.readlink(self.link_path)
             except FileNotFoundError:
                 raise RuntimeError("UUID symlink for bdev %s not found" % name)
+            self.uuid = self.uuid_path[len(self.prefix):]
         else:
             self.prefix = BlockDevice._path_prefix[type]
             self.link_path = self.prefix + name
@@ -65,7 +66,7 @@ class BlockDevice:
             if bdev_uuid is None:
                 self.uuid = str(uuid.uuid4())
             else:
-                sef.uuid = bdev_uuid
+                self.uuid = bdev_uuid
             self.uuid_path = self.prefix + self.uuid
             if os.path.exists(self.uuid_path):
                 raise NameError("bdev %s already exists" % self.uuid_path)
@@ -166,25 +167,27 @@ class JSONRPC:
 
         if 'nsid' in ns_params:
             nsid = ns_params['nsid']
+
         try:
             ns = nvme.Namespace(subsys, nsid, mode='create')
-        except CFSError:
-            raise NameError("Namespace %s not created" % nsid)
+        except:
+            raise NameError("Namespace %s already exists" % nsid)
         try:
             ns.set_attr("device", "uuid", bdev.uuid)
         except:
             ns.delete()
-            raise RuntimeError("Failed to set uuid on ns %s" % nsid)
+            raise RuntimeError("Failed to set uuid %s on ns %s" % (bdev.uuid, nsid))
         try:
             ns.set_attr("device", "path", bdev.uuid_path)
         except:
             ns.delete()
             raise RuntimeError("Failed to set path on ns %s" % nsid)
+        # We should enable the namespace here, but it'll fail
+        # if no ports are connected
         try:
             ns.set_enable(1)
         except:
-            ns.delete()
-            raise RuntimeError("Failed to enable ns %s" % nsid)
+            pass
         return
 
     def _remove_ns(self, params):
@@ -199,6 +202,12 @@ class JSONRPC:
         except CFSError:
             raise NameError("Namespace %d not found" % nsid)
         ns.delete()
+
+    def _add_port(self, param):
+        return
+
+    def _remove_port(self, param):
+        return
 
     def _create_malloc(self, params):
         bdev_name = params['name']
@@ -240,8 +249,8 @@ class JSONRPC:
                         nvmf_delete_subsystem=_delete_subsystem,
                         nvmf_subsystem_add_ns=_add_ns,
                         nvmf_subsystem_remove_ns=_remove_ns,
-                        nvmf_subsystem_add_listener=_get_subsystems,
-                        nvmf_subsystem_remove_listener=_get_subsystems,
+                        nvmf_subsystem_add_listener=_add_port,
+                        nvmf_subsystem_remove_listener=_remove_port,
                         nvmf_get_subsystems=_get_subsystems,
                         get_nvmf_subsystems=_get_subsystems)
 
