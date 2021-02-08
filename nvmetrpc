@@ -24,13 +24,225 @@ import os
 import sys
 import json
 import socket
+import kmod
+import uuid
 import nvmet as nvme
 
+class BlockDevice:
+    _path_prefix = dict( malloc='/dev/shm/', lvol='/home/longhorn')
+
+    def __init__(self, name, bdev_uuid = None, type = 'any', mode = 'lookup'):
+        self.name = name
+        if type == 'any':
+            if mode == 'create':
+                raise NameError("Need to specify a mode for 'lookup'")
+        elif type not in BlockDevice._path_prefix:
+            raise NameError("Invalid bdev type %s" % type)
+
+        if mode == 'lookup':
+            if type == 'any':
+                for p in BlockDevice._path_prefix:
+                    self.prefix = BlockDevice._path_prefix[p]
+                    if os.path.exists(self.prefix + name):
+                        self.link_path = self.prefix + name
+                        break
+                if not self.link_path:
+                    raise NameError("bdev %s not found" % name)
+            else:
+                self.prefix = BlockDevice._path_prefix[type]
+                self.link_path = self.prefix + name
+                if not os.path_exists(self.link_path):
+                    raise NameError("%s bdev %s not found" % (type, name))
+            try:
+                self.uuid_path = os.readlink(self.link_path)
+            except FileNotFoundError:
+                raise RuntimeError("UUID symlink for bdev %s not found" % name)
+        else:
+            self.prefix = BlockDevice._path_prefix[type]
+            self.link_path = self.prefix + name
+            if os.path.exists(self.prefix + name):
+                raise NameError("%s bdev %s already exists" % (type, name))
+            if bdev_uuid is None:
+                self.uuid = str(uuid.uuid4())
+            else:
+                sef.uuid = bdev_uuid
+            self.uuid_path = self.prefix + self.uuid
+            if os.path.exists(self.uuid_path):
+                raise NameError("bdev %s already exists" % self.uuid_path)
+            try:
+                fd = open(self.uuid_path, 'x')
+            except:
+                raise NameError("Cannot create %s" % self.uuid_path)
+            fd.close()
+            try:
+                os.symlink(self.uuid_path, self.link_path)
+            except:
+                raise RuntimeError("Failed to link %s to %s" % (self.link_path, self.uuid_path))
+
+    def set_size(self, bdev_size):
+        self.bdev_size = bdev_size
+        try:
+            os.truncate(self.uuid_path, self.bdev_size)
+        except:
+            raise RuntimeError("Failed to truncate %s" % self.uuid_path)
+
 class JSONRPC:
-    def _get_subsystems(self):
+    def _get_subsystems(self, params = None):
         return [s.dump() for s in self.cfg.subsystems]
 
-    _rpc_methods = dict(nvmf_get_subsystems=_get_subsystems,
+    def _get_transports(self, params = None):
+        km = kmod.Kmod()
+        ml = []
+        for m in km.loaded():
+            if m.name.startswith("nvmet_"):
+                ml.append(m.name[len("nvmet_"):])
+            elif m.name == "nvme_loop":
+                ml.append(m.name[len("nvme_"):])
+        return ml
+
+    def _create_transport(self, params):
+        km = kmod.Kmod()
+        trtype = params['trtype']
+        try:
+            km.modprobe("nvmet_" + trtype.lower())
+        except:
+            raise NameError("Module nvmet_%s not found" % trtype.lower())
+        return
+
+    def _create_subsystem(self, params):
+        nqn = params['nqn']
+        try:
+            subsys = nvme.Subsystem(nqn, mode='create')
+        except:
+            raise RuntimeError("Failed to create subsystem %s" % nqn)
+        if 'model_number' in params:
+            model = params['model_number']
+            if (len(model) > 40):
+                subsys.delete()
+                raise NameError("Model number longer than 40 characters")
+            try:
+                subsys.set_attr("attr", "model", model)
+            except:
+                subsys.delete()
+                raise RuntimeError("Failed to set model %s" % model)
+        if 'serial_number' in params:
+            serial = params['serial_number']
+            if len(serial) > 20:
+                subsys.delete()
+                raise NameError("Serial number longer than 20 characters")
+            try:
+                subsys.set_attr("attr", "serial", serial)
+            except:
+                subsys.delete()
+                raise RuntimeError("Failed to set serial %s" % serial)
+        if 'allow_any_host' in params:
+            subsys.set_attr("attr", "allow_any_host", "1")
+        return
+
+    def _delete_subsystem(self, params):
+        nqn = params['nqn']
+        try:
+            subsys = nvme.Subsystem(nqn, mode='lookup');
+        except CFSError:
+            raise NameError("Subsystem %s not found" % nqn)
+        try:
+            subsys.delete()
+        except:
+            raise RuntimeError("Failed to delete subsystem %s" % nqn)
+        return
+
+    def _add_ns(self, params):
+        nqn = params['nqn']
+        ns_params = params['namespace']
+        bdev_name = ns_params['bdev_name']
+        try:
+            bdev = BlockDevice(bdev_name)
+        except:
+            raise NameError("bdev %s not found" % bdev_name)
+        try:
+            subsys = nvme.Subsystem(nqn, mode='lookup')
+        except CFSError:
+            raise NameError("Subsystem %s not found" % nqn)
+
+        if 'nsid' in ns_params:
+            nsid = ns_params['nsid']
+        try:
+            ns = nvme.Namespace(subsys, nsid, mode='create')
+        except CFSError:
+            raise NameError("Namespace %s not created" % nsid)
+        try:
+            ns.set_attr("device", "uuid", bdev.uuid)
+        except:
+            ns.delete()
+            raise RuntimeError("Failed to set uuid on ns %s" % nsid)
+        try:
+            ns.set_attr("device", "path", bdev.uuid_path)
+        except:
+            ns.delete()
+            raise RuntimeError("Failed to set path on ns %s" % nsid)
+        try:
+            ns.set_enable(1)
+        except:
+            ns.delete()
+            raise RuntimeError("Failed to enable ns %s" % nsid)
+        return
+
+    def _remove_ns(self, params):
+        nqn = params['nqn']
+        nsid = params['nsid']
+        try:
+            subsys = nvme.Subsystem(nqn, mode='lookup')
+        except CFSError:
+            raise NameError("Subsystem %s not found" % nqn)
+        try:
+            ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        except CFSError:
+            raise NameError("Namespace %d not found" % nsid)
+        ns.delete()
+
+    def _create_malloc(self, params):
+        bdev_name = params['name']
+        bdev_blocksize = params['block_size']
+        bdev_blocks = params['num_blocks']
+        if 'uuid' in params:
+            bdev_uuid = params['uuid']
+        else:
+            bdev_uuid = None
+
+        bdev = BlockDevice(bdev_name, type='malloc', mode='create')
+        bdev.set_size(int(bdev_blocks) * int(bdev_blocksize))
+        return bdev.name
+
+    def _delete_malloc(self, params):
+        bdev_name = params['name']
+        bdev_path = '/dev/shm/' + bdev_name
+        try:
+            bdev_uuid_name = os.readlink(bdev_path)
+        except FileNotFoundError:
+            pass
+        try:
+            os.remove(bdev_path)
+        except FileNotFoundError:
+            raise NameError("%s does not exist" % bdev_name)
+        try:
+            os.remove(bdev_uuid_name)
+        except FileNotFoundError:
+            raise RuntimeError("%s does not exist" % bdev_uuid_path)
+        return
+
+    _rpc_methods = dict(bdev_malloc_create=_create_malloc,
+                        bdev_malloc_delete=_delete_malloc,
+                        bdev_lvol_create=_get_subsystems,
+                        bdev_lvol_delete=_get_subsystems,
+                        nvmf_create_transport=_create_transport,
+                        nvmf_get_transports=_get_transports,
+                        nvmf_create_subsystem=_create_subsystem,
+                        nvmf_delete_subsystem=_delete_subsystem,
+                        nvmf_subsystem_add_ns=_add_ns,
+                        nvmf_subsystem_remove_ns=_remove_ns,
+                        nvmf_subsystem_add_listener=_get_subsystems,
+                        nvmf_subsystem_remove_listener=_get_subsystems,
+                        nvmf_get_subsystems=_get_subsystems,
                         get_nvmf_subsystems=_get_subsystems)
 
     def __init__(self, sockname):
@@ -71,14 +283,22 @@ class JSONRPC:
     def rpc_call(self, req):
         print ("%s" % req)
         method = req['method']
+        params = req['params']
         id = req['id']
         if method not in self._rpc_methods.keys():
             error = dict(code=-32601,message='Method not found')
             resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
         else:
-            result = self._rpc_methods[method](self)
-            resp = json.dumps(dict(result=result, id=id, jsonrpc="2.0"))
-        print ("%s" % resp)
+            try:
+                result = self._rpc_methods[method](self, params)
+                resp = json.dumps(dict(result=result, id=id, jsonrpc="2.0"))
+            except NameError as n:
+                error = dict(code=-32602, message='Invalid params', data=n.args)
+                resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
+            except RuntimeError as err:
+                error = dict(code=-32000, message=err.args)
+                resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
+            print ("%s" % resp)
         return resp
 
     def rpc_shutdown(self):
