@@ -25,13 +25,13 @@ import sys
 import json
 import socket
 import kmod
-import uuid
+import uuid as UUID
 import nvmet as nvme
 
 class BlockDevice:
     _path_prefix = dict( malloc='/dev/shm/', lvol='/home/longhorn')
 
-    def __init__(self, name, bdev_uuid = None, type = 'any', mode = 'lookup'):
+    def __init__(self, name, uuid = None, type = 'any', mode = 'lookup'):
         self.name = name
         if type == 'any':
             if mode == 'create':
@@ -63,10 +63,10 @@ class BlockDevice:
             self.link_path = self.prefix + name
             if os.path.exists(self.prefix + name):
                 raise NameError("%s bdev %s already exists" % (type, name))
-            if bdev_uuid is None:
-                self.uuid = str(uuid.uuid4())
+            if uuid is None:
+                self.uuid = str(UUID.uuid4())
             else:
-                self.uuid = bdev_uuid
+                self.uuid = uuid
             self.uuid_path = self.prefix + self.uuid
             if os.path.exists(self.uuid_path):
                 raise NameError("bdev %s already exists" % self.uuid_path)
@@ -79,6 +79,16 @@ class BlockDevice:
                 os.symlink(self.uuid_path, self.link_path)
             except:
                 raise RuntimeError("Failed to link %s to %s" % (self.link_path, self.uuid_path))
+
+    def delete(self):
+        try:
+            os.remove(self.link_path)
+        except FileNotFoundError:
+            raise RuntimeError("link %s does not exist" % self.link_path)
+        try:
+            os.remove(self.uuid_path)
+        except FileNotFoundError:
+            raise RuntimeError("bdev %s does not exist" % self.uuid_path)
 
     def set_size(self, bdev_size):
         self.bdev_size = bdev_size
@@ -218,31 +228,43 @@ class JSONRPC:
         else:
             bdev_uuid = None
 
-        bdev = BlockDevice(bdev_name, type='malloc', mode='create')
+        bdev = BlockDevice(bdev_name, bdev_uuid, type='malloc', mode='create')
         bdev.set_size(int(bdev_blocks) * int(bdev_blocksize))
         return bdev.name
 
     def _delete_malloc(self, params):
         bdev_name = params['name']
-        bdev_path = '/dev/shm/' + bdev_name
         try:
-            bdev_uuid_name = os.readlink(bdev_path)
-        except FileNotFoundError:
-            pass
+            bdev = BlockDevice(bdev_name, type='malloc')
+        except:
+            raise NameError("bdev %s not found" % bdev_name)
+        bdev.delete()
+
+    def _create_lvol(self, params):
+        bdev_name = params['name']
+        bdev_blocksize = params['block_size']
+        bdev_blocks = params['num_blocks']
+        if 'uuid' in params:
+            bdev_uuid = params['uuid']
+        else:
+            bdev_uuid = None
+
+        bdev = BlockDevice(bdev_name, bdev_uuid, type='lvol', mode='create')
+        bdev.set_size(int(bdev_blocks) * int(bdev_blocksize))
+        return bdev.name
+
+    def _delete_lvol(self, params):
+        bdev_name = params['name']
         try:
-            os.remove(bdev_path)
-        except FileNotFoundError:
-            raise NameError("%s does not exist" % bdev_name)
-        try:
-            os.remove(bdev_uuid_name)
-        except FileNotFoundError:
-            raise RuntimeError("%s does not exist" % bdev_uuid_path)
-        return
+            bdev = BlockDevice(bdev_name, type='lvol')
+        except:
+            raise NameError("bdev %s not found" % bdev_name)
+        bdev.delete()
 
     _rpc_methods = dict(bdev_malloc_create=_create_malloc,
                         bdev_malloc_delete=_delete_malloc,
-                        bdev_lvol_create=_get_subsystems,
-                        bdev_lvol_delete=_get_subsystems,
+                        bdev_lvol_create=_create_lvol,
+                        bdev_lvol_delete=_delete_lvol,
                         nvmf_create_transport=_create_transport,
                         nvmf_get_transports=_get_transports,
                         nvmf_create_subsystem=_create_subsystem,
