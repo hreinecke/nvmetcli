@@ -350,7 +350,10 @@ class JSONRPC:
     def rpc_call(self, req):
         print ("%s" % req)
         method = req['method']
-        params = req['params']
+        if 'params' in req:
+            params = req['params']
+        else:
+            params = None
         id = req['id']
         if method not in self._rpc_methods.keys():
             error = dict(code=-32601,message='Method not found')
