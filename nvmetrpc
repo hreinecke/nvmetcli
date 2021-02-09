@@ -29,7 +29,7 @@ import uuid as UUID
 import nvmet as nvme
 
 class BlockDevice:
-    _path_prefix = dict( malloc='/dev/shm/', lvol='/home/longhorn/')
+    _path_prefix = dict( malloc='/dev/shm/', lvol='/srv/longhorn/')
 
     def __init__(self, name, uuid = None, type = 'any', mode = 'lookup'):
         self.name = name
@@ -51,7 +51,7 @@ class BlockDevice:
             else:
                 self.prefix = BlockDevice._path_prefix[type]
                 self.link_path = self.prefix + name
-                if not os.path_exists(self.link_path):
+                if not os.path.exists(self.link_path):
                     raise NameError("%s bdev %s not found" % (type, name))
             try:
                 self.uuid_path = os.readlink(self.link_path)
@@ -89,6 +89,25 @@ class BlockDevice:
             os.remove(self.uuid_path)
         except FileNotFoundError:
             raise RuntimeError("bdev %s does not exist" % self.uuid_path)
+
+    def snapshot(self, clone, uuid=None):
+        if not uuid:
+            uuid = str(UUID.uuid4())
+        clone_uuid_path = self.prefix + uuid
+        if os.path.exists(clone_uuid_path):
+            raise NameError("snapshot uuid %s already exists" % uuid)
+        clone_link_path = self.prefix + clone
+        if os.path.exists(clone_link_path):
+            raise NameError("snapshot %s already exists" % clone)
+        try:
+            os.system("cp --reflink %s %s" % (self.uuid_path, clone_uuid_path) )
+        except:
+            raise RuntimeError("failed to clone bdev %s to %s" % (self.uuid_path, clone_uuid_path))
+        try:
+            os.symlink(clone_uuid_path, clone_link_path)
+        except:
+            raise RuntimeError("failed to link %s to %s" % (clone_link_path, clone_uuid_path))
+        return clone
 
     def set_size(self, bdev_size):
         self.bdev_size = bdev_size
@@ -270,10 +289,7 @@ class JSONRPC:
 
     def _delete_malloc(self, params):
         bdev_name = params['name']
-        try:
-            bdev = BlockDevice(bdev_name, type='malloc')
-        except:
-            raise NameError("bdev %s not found" % bdev_name)
+        bdev = BlockDevice(bdev_name, type='malloc')
         bdev.delete()
 
     def _create_lvol(self, params):
@@ -290,11 +306,20 @@ class JSONRPC:
 
     def _delete_lvol(self, params):
         bdev_name = params['name']
-        try:
-            bdev = BlockDevice(bdev_name, type='lvol')
-        except:
-            raise NameError("bdev %s not found" % bdev_name)
+        bdev = BlockDevice(bdev_name, type='lvol')
         bdev.delete()
+
+    def _snapshot_lvol(self, params):
+        lvol = params['lvol_name']
+        snap = params['snapshot_name']
+        bdev = BlockDevice(lvol, type='lvol')
+        return bdev.snapshot(snap)
+
+    def _clone_lvol(self, params):
+        snap = params['snapshot_name']
+        clone = params['clone_name']
+        bdev = BlockDevice(snap, type='lvol')
+        return bdev.snapshot(clone)
 
     def _get_lvolstores(self, params):
         if params:
@@ -312,6 +337,8 @@ class JSONRPC:
                         bdev_malloc_delete=_delete_malloc,
                         bdev_lvol_create=_create_lvol,
                         bdev_lvol_delete=_delete_lvol,
+                        bdev_lvol_snapshot=_snapshot_lvol,
+                        bdev_lvol_clone=_clone_lvol,
                         bdev_lvol_get_lvstores=_get_lvolstores,
                         nvmf_create_transport=_create_transport,
                         nvmf_get_transports=_get_transports,
