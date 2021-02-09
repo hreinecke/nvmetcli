@@ -213,11 +213,47 @@ class JSONRPC:
             raise NameError("Namespace %d not found" % nsid)
         ns.delete()
 
-    def _add_port(self, param):
+    def _add_port(self, params):
+        try:
+            port = nvme.Port(mode='create')
+        except:
+            raise RuntimeError("Cannot create port")
+        port_params = params['listen_address']
+        for p in ('trtype', 'adrfam', 'traddr', 'trsvcid'):
+            if p not in port_params:
+                port.delete()
+                raise NameError("Invalid listen_address parameter %s" % p)
+            v = port_params[p]
+            if p == 'adrfam':
+                v = port_params[p].lower()
+            try:
+                port.set_attr("addr", p, v)
+            except:
+                port.delete()
+                raise RuntimeError("Failed to set %s to %s" % (p, v))
+        nqn = params['nqn']
+        try:
+            port.add_subsystem(nqn)
+        except:
+            port.delete()
+            raise NameError("subsystem %s not found" % nqn)
         return
 
-    def _remove_port(self, param):
-        return
+    def _remove_port(self, params):
+        nqn = params['nqn']
+        port_params = params['listen_address']
+        for port in self.cfg.ports:
+            for p in ('trtype', 'adrfam', 'traddr', 'trsvcid'):
+                if p not in port_params:
+                    continue
+                if port.get_attr("addr", p) != port_params[p]:
+                    continue
+            for s in port.subsystems:
+                if s != nqn:
+                    continue
+                port.remove_subsystem(nqn)
+                if not len(port.subsystems):
+                    port.delete()
 
     def _create_malloc(self, params):
         bdev_name = params['name']
