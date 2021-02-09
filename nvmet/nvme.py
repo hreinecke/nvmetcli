@@ -24,6 +24,7 @@ import uuid
 import json
 from glob import iglob as glob
 from six import iteritems, moves
+from pathlib import Path
 
 DEFAULT_SAVE_FILE = '/etc/nvmet/config.json'
 
@@ -640,9 +641,17 @@ class Port(CFSNode):
     def __repr__(self):
         return "<Port %d>" % self.portid
 
-    def __init__(self, portid, mode='any'):
+    def __init__(self, portid=None, mode='any'):
         super(Port, self).__init__()
 
+        if not portid:
+            p = Path("%s/ports" % self.configfs_dir)
+            max = 0
+            for x in p.iterdir():
+                if x.is_dir():
+                    if max < int(x.name):
+                        max = int(x.name)
+            portid = max + 1
         self.attr_groups = ['addr', 'param']
         self._portid = int(portid)
         self._path = "%s/ports/%d" % (self.configfs_dir, self._portid)
