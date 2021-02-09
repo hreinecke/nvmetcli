@@ -216,7 +216,7 @@ class JSONRPC:
         try:
             ns.set_enable(1)
         except:
-            pass
+            raise RuntimeError("Failed to enable ns %s" % nsid)
         return
 
     def _remove_ns(self, params):
@@ -231,6 +231,7 @@ class JSONRPC:
         except CFSError:
             raise NameError("Namespace %d not found" % nsid)
         ns.delete()
+        return True
 
     def _add_port(self, params):
         try:
@@ -256,7 +257,7 @@ class JSONRPC:
         except:
             port.delete()
             raise NameError("subsystem %s not found" % nqn)
-        return
+        return True
 
     def _remove_port(self, params):
         nqn = params['nqn']
@@ -273,6 +274,32 @@ class JSONRPC:
                 port.remove_subsystem(nqn)
                 if not len(port.subsystems):
                     port.delete()
+
+    def _add_host(self, params):
+        nqn = params['nqn']
+        try:
+            subsys = nvme.Subsystem(nqn, mode='lookup')
+        except CFSError:
+            raise NameError("Subsystem %s not found" % nqn)
+        host = params['host']
+        try:
+            subsys.add_allowed_host(host)
+        except CFSError:
+            return False
+        return True
+
+    def _remove_host(self, params):
+        nqn = params['nqn']
+        try:
+            subsys = nvme.Subsystem(nqn, mode='lookup')
+        except CFSError:
+            raise NameError("Subsystem %s not found" % nqn)
+        host = params['host']
+        try:
+            subsys.remove_allowed_host(host)
+        except CFSError:
+            return False
+        return True
 
     def _create_malloc(self, params):
         bdev_name = params['name']
@@ -348,8 +375,9 @@ class JSONRPC:
                         nvmf_subsystem_remove_ns=_remove_ns,
                         nvmf_subsystem_add_listener=_add_port,
                         nvmf_subsystem_remove_listener=_remove_port,
-                        nvmf_get_subsystems=_get_subsystems,
-                        get_nvmf_subsystems=_get_subsystems)
+                        nvmf_subsystem_add_host=_add_host,
+                        nvmf_subsystem_remove_host=_remove_host,
+                        nvmf_get_subsystems=_get_subsystems)
 
     def __init__(self, sockname):
         self.cfg = nvme.Root()
