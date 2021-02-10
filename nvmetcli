@@ -104,11 +104,11 @@ class UIRootNode(UINode):
         UIPortsNode(self)
         UIHostsNode(self)
 
-    def ui_command_restoreconfig(self, savefile=None, clear_existing=False):
+    def ui_command_restoreconfig(self, savefile=None, clear_existing=False, merge=False):
         '''
         Restores configuration from a file.
         '''
-        errors = self.cfnode.restore_from_file(savefile, clear_existing)
+        errors = self.cfnode.restore_from_file(savefile, clear_existing, merge)
         self.refresh()
 
         if errors:

@@ -206,7 +206,7 @@ class JsonRPC:
 
     def _set_config(self, params):
         try:
-            self.cfg.restore(params)
+            self.cfg.restore(params, merge=True)
         except CFSError:
             raise RuntimeError("Failed to apply configuration")
 
