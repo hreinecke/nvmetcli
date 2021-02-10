@@ -25,8 +25,18 @@ import sys
 import json
 import socket
 import kmod
+import argparse
+import base64
 import uuid as UUID
 import nvmet as nvme
+try:
+    from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+except ImportError:
+    from http.server import HTTPServer
+    from http.server import BaseHTTPRequestHandler
+
+nvmet_sock = '/var/tmp/nvmet.sock'
+nvmet_url = '/nvmet'
 
 class BlockDevice:
     _path_prefix = dict( malloc='/dev/shm/', lvol='/srv/longhorn/')
@@ -116,7 +126,7 @@ class BlockDevice:
         except:
             raise RuntimeError("Failed to truncate %s" % self.uuid_path)
 
-class JSONRPC:
+class NvmetJsonRPC:
     def _get_subsystems(self, params = None):
         return [s.dump() for s in self.cfg.subsystems]
 
@@ -133,11 +143,14 @@ class JSONRPC:
     def _create_transport(self, params):
         km = kmod.Kmod()
         trtype = params['trtype']
+        if trtype.lower() == 'loop':
+            prefix = "nvme_"
+        else:
+            prefix = "nvmet_"
         try:
-            km.modprobe("nvmet_" + trtype.lower())
+            km.modprobe(prefix + trtype.lower())
         except:
-            raise NameError("Module nvmet_%s not found" % trtype.lower())
-        return
+            raise NameError("Module %s%s not found" % (prefix, trtype.lower()))
 
     def _create_subsystem(self, params):
         nqn = params['nqn']
@@ -167,7 +180,6 @@ class JSONRPC:
                 raise RuntimeError("Failed to set serial %s" % serial)
         if 'allow_any_host' in params:
             subsys.set_attr("attr", "allow_any_host", "1")
-        return
 
     def _delete_subsystem(self, params):
         nqn = params['nqn']
@@ -179,7 +191,6 @@ class JSONRPC:
             subsys.delete()
         except:
             raise RuntimeError("Failed to delete subsystem %s" % nqn)
-        return
 
     def _add_ns(self, params):
         nqn = params['nqn']
@@ -211,13 +222,10 @@ class JSONRPC:
         except:
             ns.delete()
             raise RuntimeError("Failed to set path on ns %s" % nsid)
-        # We should enable the namespace here, but it'll fail
-        # if no ports are connected
         try:
             ns.set_enable(1)
         except:
             raise RuntimeError("Failed to enable ns %s" % nsid)
-        return
 
     def _remove_ns(self, params):
         nqn = params['nqn']
@@ -231,7 +239,6 @@ class JSONRPC:
         except CFSError:
             raise NameError("Namespace %d not found" % nsid)
         ns.delete()
-        return True
 
     def _add_port(self, params):
         try:
@@ -257,7 +264,6 @@ class JSONRPC:
         except:
             port.delete()
             raise NameError("subsystem %s not found" % nqn)
-        return True
 
     def _remove_port(self, params):
         nqn = params['nqn']
@@ -379,8 +385,35 @@ class JSONRPC:
                         nvmf_subsystem_remove_host=_remove_host,
                         nvmf_get_subsystems=_get_subsystems)
 
-    def __init__(self, sockname):
+    def __init__(self):
         self.cfg = nvme.Root()
+
+    def rpc_call(self, req):
+        print ("%s" % req)
+        method = req['method']
+        if 'params' in req:
+            params = req['params']
+        else:
+            params = None
+        id = req['id']
+        if method not in self._rpc_methods:
+            error = dict(code=-32601,message='Method not found')
+            resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
+        else:
+            try:
+                result = self._rpc_methods[method](self, params)
+                resp = json.dumps(dict(result=result, id=id, jsonrpc="2.0"))
+            except NameError as n:
+                error = dict(code=-32602, message='Invalid params', data=n.args)
+                resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
+            except RuntimeError as err:
+                error = dict(code=-32000, message=err.args)
+                resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
+            print ("%s" % resp)
+        return resp
+
+class JSONRPC:
+    def __init__(self, sockname):
         self.sockname = sockname
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -409,34 +442,11 @@ class JSONRPC:
                     req = json.loads(buf)
                 except ValueError:
                     continue
-                response = self.rpc_call(req)
+                rpc = NvmetJsonRPC()
+                response = rpc.rpc_call(req)
                 client.sendall(response.encode('ascii'))
                 client.close()
                 closed = True
-
-    def rpc_call(self, req):
-        print ("%s" % req)
-        method = req['method']
-        if 'params' in req:
-            params = req['params']
-        else:
-            params = None
-        id = req['id']
-        if method not in self._rpc_methods.keys():
-            error = dict(code=-32601,message='Method not found')
-            resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
-        else:
-            try:
-                result = self._rpc_methods[method](self, params)
-                resp = json.dumps(dict(result=result, id=id, jsonrpc="2.0"))
-            except NameError as n:
-                error = dict(code=-32602, message='Invalid params', data=n.args)
-                resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
-            except RuntimeError as err:
-                error = dict(code=-32000, message=err.args)
-                resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
-            print ("%s" % resp)
-        return resp
 
     def rpc_shutdown(self):
         self.sock.close()
@@ -444,25 +454,104 @@ class JSONRPC:
     def __exit__(self, exc_type, exc_value, traceback):
         os.remove(self.sockname)
 
+class ServerHandler(BaseHTTPRequestHandler):
+    key = ""
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+
+    def do_AUTHHEAD(self):
+        self.send_response(401)
+        self.send_header('WWW-Authenticate', 'text/html')
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+    def do_INTERNALERROR(self):
+        self.send_response(500)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+    def do_NOTFOUND(self):
+        self.send_response(404)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+    def do_POST(self):
+        if self.path != self.directory:
+            self.do_NOTFOUND()
+            return
+        if self.key and self.headers['Authorization'] != 'Basic ' + self.key:
+            self.do_AUTHHEAD()
+        else:
+            data_string = self.rfile.read(int(self.headers['Content-Length']))
+
+            try:
+                req = json.loads(data_string)
+            except ValueError:
+                self.do_INTERNALERROR()
+                return
+            rpc = NvmetJsonRPC()
+            response = rpc.rpc_call(req)
+            self.do_HEAD()
+            self.wfile.write(bytes(response.encode(encoding='ascii')))
+
 def main():
-    sockname = '/var/tmp/spdk.sock'
+    parser = argparse.ArgumentParser(description='JSON RPC proxy for nvmet')
+    parser.add_argument('-s', '--socket', dest='sock', default=nvmet_sock,
+                        help="Socket to listen on, default is " + nvmet_sock)
+    parser.add_argument('-H', '--host', dest='host', help='Host address')
+    parser.add_argument('-p', '--port', dest='port', type=int, default=4260,
+                        help='Port number')
+    parser.add_argument('-U', '--user', dest='user',
+                        help='user name for authentication')
+    parser.add_argument('-P', '--password', dest='password',
+                        help='password for authentication')
+    parser.add_argument('-c', '--cert', dest='cert',
+                        help='SSL certificate')
+    parser.add_argument('-u', '--url', dest='url', default=nvmet_url,
+                        help="URL path to serve, default is " + nvmet_url)
+
+    args = parser.parse_args()
+    if args.user and not args.password:
+        sys.exit("No password specified for username %s" % args.user)
+    if args.password and not args.user:
+        sys.exit("No username specified")
+    if args.user:
+        if not args.host:
+            sys.exit("Username and password are only valid for HTTP server")
+        key = base64.b64encode(bytes('%s:%s' % (args.user, args.password), 'utf-8')).decode('ascii')
+        ServerHandler.key = key
+
+    if args.url:
+        ServerHandler.directory = args.url
+
     if os.geteuid() != 0:
        print("%s: must run as root." % sys.argv[0], file=sys.stderr)
        sys.exit(-1)
 
-    if len(sys.argv) > 2:
-        usage()
 
-    if len(sys.argv) == 2:
-        sockname = sys.argv[1]
-
-    with JSONRPC(sockname) as s:
-        try:
-            print('Started RPC http proxy server')
-            s.rpc_server()
-        except KeyboardInterrupt:
-            print('Shutting down server')
-            s.rpc_shutdown()
+    if args.host:
+        with HTTPServer((args.host, args.port), ServerHandler) as httpd:
+            try:
+                if args.cert is not None:
+                    http.socket = ssl.wrap_socket(httpd.socket,
+                                                  certfile=args.cert,
+                                                  server_side=True)
+                print("Started JSON RPC http proxy server on %s:%d key %s" % (args.host, args.port, key))
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                print("Shutting down server")
+                httpd.socket.close()
+    else:
+        with JSONRPC(args.sock) as s:
+            try:
+                print("Started JSON RPC proxy server on %s" % args.sock)
+                s.rpc_server()
+            except KeyboardInterrupt:
+                print('Shutting down server')
+                s.rpc_shutdown()
 
 if __name__ == '__main__':
     main()
