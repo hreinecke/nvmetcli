@@ -390,27 +390,32 @@ class NvmetJsonRPC:
 
     def rpc_call(self, req):
         print ("%s" % req)
-        method = req['method']
+        if 'method' in req:
+            method = req['method']
+        else:
+            method = None
         if 'params' in req:
             params = req['params']
         else:
             params = None
-        id = req['id']
+        resp = dict(jsonrpc='2.0')
+        if 'id' in req:
+            resp['id'] = req['id']
         if method not in self._rpc_methods:
             error = dict(code=-32601,message='Method not found')
-            resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
+            resp['error'] = error;
         else:
             try:
                 result = self._rpc_methods[method](self, params)
-                resp = json.dumps(dict(result=result, id=id, jsonrpc="2.0"))
+                resp['result'] = result
             except NameError as n:
                 error = dict(code=-32602, message='Invalid params', data=n.args)
-                resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
+                resp['error'] = error
             except RuntimeError as err:
                 error = dict(code=-32000, message=err.args)
-                resp = json.dumps(dict(error=error, id=id, jsonrpc="2.0"))
-            print ("%s" % resp)
-        return resp
+                resp['error'] = error
+            print ("%s" % json.dumps(resp))
+        return json.dumps(resp)
 
 class JSONRPC:
     def __init__(self, sockname):
@@ -469,14 +474,17 @@ class ServerHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_INTERNALERROR(self):
-        self.send_response(500)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
+        self.send_error(500, message='Internal Server Error',
+                        explain='Failed to parse JSON RPC request')
 
     def do_NOTFOUND(self):
-        self.send_response(404)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
+        self.send_error(404)
+
+    def do_GET(self):
+        self.send_error(501, message="Unsupported method ('%s')" % self.command)
+
+    def do_PUT(self):
+        self.send_error(501, message="Unsupported method ('%s')" % self.command)
 
     def do_POST(self):
         if self.path != self.directory:
@@ -486,7 +494,6 @@ class ServerHandler(BaseHTTPRequestHandler):
             self.do_AUTHHEAD()
         else:
             data_string = self.rfile.read(int(self.headers['Content-Length']))
-
             try:
                 req = json.loads(data_string)
             except ValueError:
