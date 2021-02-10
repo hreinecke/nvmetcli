@@ -307,6 +307,15 @@ class NvmetJsonRPC:
             return False
         return True
 
+    def _get_config(self, params):
+        return self.cfg.dump()
+
+    def _set_config(self, params):
+        try:
+            self.cfg.restore(params)
+        except CFSError:
+            raise RuntimeError("Failed to apply configuration")
+
     def _create_malloc(self, params):
         bdev_name = params['name']
         bdev_blocksize = params['block_size']
@@ -383,7 +392,9 @@ class NvmetJsonRPC:
                         nvmf_subsystem_remove_listener=_remove_port,
                         nvmf_subsystem_add_host=_add_host,
                         nvmf_subsystem_remove_host=_remove_host,
-                        nvmf_get_subsystems=_get_subsystems)
+                        nvmf_get_subsystems=_get_subsystems,
+                        nvmf_get_config=_get_config,
+                        nvmf_set_config=_set_config)
 
     def __init__(self):
         self.cfg = nvme.Root()
