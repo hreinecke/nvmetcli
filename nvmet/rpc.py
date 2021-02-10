@@ -20,6 +20,7 @@ import os
 import stat
 import json
 import nvmet as nvme
+import netifaces
 
 class JsonRPC:
     def _get_subsystems(self, params = None):
@@ -36,6 +37,8 @@ class JsonRPC:
         return ml
 
     def _create_transport(self, params):
+        if not params or 'trtype' not in params:
+            raise NameError("Parameter 'trtype' missing")
         trtype = params['trtype']
         if trtype.lower() == 'loop':
             prefix = "nvme_"
@@ -47,6 +50,8 @@ class JsonRPC:
             raise NameError("Module %s%s not found" % (prefix, trtype.lower()))
 
     def _create_subsystem(self, params):
+        if not params and 'nqn' not in params:
+            raise NameError("Parameter 'nqn' missing")
         nqn = params['nqn']
         try:
             subsys = nvme.Subsystem(nqn, mode='create')
@@ -76,6 +81,8 @@ class JsonRPC:
             subsys.set_attr("attr", "allow_any_host", "1")
 
     def _delete_subsystem(self, params):
+        if not params and 'nqn' not in params:
+            raise NameError("Parameter 'nqn' missing")
         nqn = params['nqn']
         try:
             subsys = nvme.Subsystem(nqn, mode='lookup');
@@ -87,7 +94,11 @@ class JsonRPC:
             raise RuntimeError("Failed to delete subsystem %s" % nqn)
 
     def _add_ns(self, params):
+        if not params and 'nqn' not in params:
+            raise NameError("Parameter 'nqn' missing")
         nqn = params['nqn']
+        if 'namespace' not in params:
+            raise NameError("Parameter 'namespace' missing")
         ns_params = params['namespace']
         bdev_name = ns_params['bdev_name']
         try:
@@ -101,6 +112,8 @@ class JsonRPC:
 
         if 'nsid' in ns_params:
             nsid = ns_params['nsid']
+        else:
+            nsid = None
 
         try:
             ns = nvme.Namespace(subsys, nsid, mode='create')
@@ -122,7 +135,11 @@ class JsonRPC:
             raise RuntimeError("Failed to enable ns %s" % nsid)
 
     def _remove_ns(self, params):
+        if not params and 'nqn' not in params:
+            raise NameError("Parameter 'nqn' missing")
         nqn = params['nqn']
+        if 'nsid' not in params:
+            raise NameError("Parameter 'nsid' missing")
         nsid = params['nsid']
         try:
             subsys = nvme.Subsystem(nqn, mode='lookup')
@@ -135,6 +152,10 @@ class JsonRPC:
         ns.delete()
 
     def _add_port(self, params):
+        if not params of 'nqn' not in params:
+            raise NameError("Parameter 'nqn' missing")
+        if 'listen_address' not in params:
+            raise NameError("Parameter 'listen_address' missing")
         try:
             port = nvme.Port(mode='create')
         except:
@@ -142,9 +163,13 @@ class JsonRPC:
         port_params = params['listen_address']
         for p in ('trtype', 'adrfam', 'traddr', 'trsvcid'):
             if p not in port_params:
-                port.delete()
-                raise NameError("Invalid listen_address parameter %s" % p)
-            v = port_params[p]
+                if p != 'trsvcid':
+                    port.delete()
+                    raise NameError("Invalid listen_address parameter %s" % p)
+                else:
+                    v = 4420
+            else:
+                v = port_params[p]
             if p == 'adrfam':
                 v = port_params[p].lower()
             try:
@@ -160,6 +185,10 @@ class JsonRPC:
             raise NameError("subsystem %s not found" % nqn)
 
     def _remove_port(self, params):
+        if not params of 'nqn' not in params:
+            raise NameError("Parameter 'nqn' missing")
+        if 'listen_address' not in params:
+            raise NameError("Parameter 'listen_address' missing")
         nqn = params['nqn']
         port_params = params['listen_address']
         for port in self.cfg.ports:
@@ -176,6 +205,10 @@ class JsonRPC:
                     port.delete()
 
     def _add_host(self, params):
+        if not params of 'nqn' not in params:
+            raise NameError("Parameter 'nqn' missing")
+        if 'host' not in params:
+            raise NameError("Parameter 'host' missing")
         nqn = params['nqn']
         try:
             subsys = nvme.Subsystem(nqn, mode='lookup')
@@ -189,6 +222,10 @@ class JsonRPC:
         return True
 
     def _remove_host(self, params):
+        if not params of 'nqn' not in params:
+            raise NameError("Parameter 'nqn' missing")
+        if 'host' not in params:
+            raise NameError("Parameter 'host' missing")
         nqn = params['nqn']
         try:
             subsys = nvme.Subsystem(nqn, mode='lookup')
@@ -210,6 +247,28 @@ class JsonRPC:
         except CFSError:
             raise RuntimeError("Failed to apply configuration")
 
+    def _get_interfaces(self, params):
+        ifnames = {}
+        for i in netifaces.interfaces():
+            if i == 'lo':
+                continue;
+            iflist = {}
+            ifaddrs = netifaces.ifaddresses(i)
+            try:
+                a = ifaddrs[netifaces.AF_INET]
+            except:
+                pass
+            else:
+                iflist['ipv4'] = a
+            try:
+                a = ifaddrs[netifaces.AF_INET6]
+            except:
+                pass
+            else:
+                iflist['ipv6'] = a
+            ifnames[i] = iflist
+        return ifnames
+
     def _create_malloc(self, params):
         bdev_name = params['name']
         bdev_blocksize = params['block_size']
@@ -230,7 +289,11 @@ class JsonRPC:
         bdev.delete()
 
     def _create_lvol(self, params):
+        if not params or 'lvol_name' not in params:
+            raise NameError("parameter 'lvol_name' missing")
         bdev_name = params['lvol_name']
+        if 'size' not in params:
+            raise NameError("parameter 'size' missing")
         bdev_size = params['size']
         if 'uuid' in params:
             bdev_uuid = params['uuid']
@@ -278,6 +341,7 @@ class JsonRPC:
                         bdev_lvol_snapshot=_snapshot_lvol,
                         bdev_lvol_clone=_clone_lvol,
                         bdev_lvol_get_lvstores=_get_lvolstores,
+                        net_get_interfaces=_get_interfaces,
                         nvmf_create_transport=_create_transport,
                         nvmf_get_transports=_get_transports,
                         nvmf_create_subsystem=_create_subsystem,

@@ -166,7 +166,7 @@ def main():
                     http.socket = ssl.wrap_socket(httpd.socket,
                                                   certfile=args.cert,
                                                   server_side=True)
-                print("Started JSON RPC http proxy server on %s:%d key %s" % (args.host, args.port, key))
+                print("Started JSON RPC http proxy server on %s:%d" % (args.host, args.port))
                 httpd.serve_forever()
             except KeyboardInterrupt:
                 print("Shutting down server")
