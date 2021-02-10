@@ -91,7 +91,7 @@ class JsonRPC:
         ns_params = params['namespace']
         bdev_name = ns_params['bdev_name']
         try:
-            bdev = BlockDevice(bdev_name)
+            bdev = nvme.BlockDevice(bdev_name)
         except:
             raise NameError("bdev %s not found" % bdev_name)
         try:
@@ -219,13 +219,14 @@ class JsonRPC:
         else:
             bdev_uuid = None
 
-        bdev = BlockDevice(bdev_name, bdev_uuid, type='malloc', mode='create')
+        bdev = nvme.BlockDevice(bdev_name, bdev_uuid,
+                                type='malloc', mode='create')
         bdev.set_size(int(bdev_blocks) * int(bdev_blocksize))
         return bdev.name
 
     def _delete_malloc(self, params):
         bdev_name = params['name']
-        bdev = BlockDevice(bdev_name, type='malloc')
+        bdev = nvme.BlockDevice(bdev_name, type='malloc')
         bdev.delete()
 
     def _create_lvol(self, params):
@@ -236,25 +237,26 @@ class JsonRPC:
         else:
             bdev_uuid = None
 
-        bdev = BlockDevice(bdev_name, bdev_uuid, type='lvol', mode='create')
+        bdev = nvme.BlockDevice(bdev_name, bdev_uuid,
+                                type='lvol', mode='create')
         bdev.set_size(int(bdev_size))
         return bdev.name
 
     def _delete_lvol(self, params):
         bdev_name = params['name']
-        bdev = BlockDevice(bdev_name, type='lvol')
+        bdev = nvme.BlockDevice(bdev_name, type='lvol')
         bdev.delete()
 
     def _snapshot_lvol(self, params):
         lvol = params['lvol_name']
         snap = params['snapshot_name']
-        bdev = BlockDevice(lvol, type='lvol')
+        bdev = nvme.BlockDevice(lvol, type='lvol')
         return bdev.snapshot(snap)
 
     def _clone_lvol(self, params):
         snap = params['snapshot_name']
         clone = params['clone_name']
-        bdev = BlockDevice(snap, type='lvol')
+        bdev = nvme.BlockDevice(snap, type='lvol')
         return bdev.snapshot(clone)
 
     def _get_lvolstores(self, params):
@@ -263,7 +265,7 @@ class JsonRPC:
                 lvs_uuid = params['uuid']
             if 'lvs_name' in params:
                 lvs_name = params['lvs_name']
-        st = os.statvfs(BlockDevice._path_prefix['lvol'])
+        st = os.statvfs(nvme.BlockDevice._path_prefix['lvol'])
         return dict(name='longhorn',
                     cluster_size=st.f_frsize,
                     free_clusters=st.f_bavail,
