@@ -1,0 +1,197 @@
+#!/usr/bin/python
+
+'''
+Simple json-rpc proxy daemon, based on the SPDK JSON RPC methods
+
+Copyright (c) 2021 by Hannes Reinecke, SUSE Linux LLC
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this file except in compliance with the License. You may obtain
+a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
+'''
+
+from __future__ import print_function
+
+import os
+import sys
+import json
+import socket
+import argparse
+import base64
+import uuid as UUID
+import nvmet as nvme
+try:
+    from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+except ImportError:
+    from http.server import HTTPServer
+    from http.server import BaseHTTPRequestHandler
+
+nvmet_sock = '/var/tmp/nvmet.sock'
+nvmet_url = '/nvmet'
+
+class SocketHandler:
+    def __init__(self, sockname):
+        self.sockname = sockname
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self.sock.bind(self.sockname)
+        except OSError:
+            print("cannot bind to %s" % self.sockname)
+            return None
+        self.sock.listen(10)
+
+    def __enter__(self):
+        return self
+
+    def rpc_server(self):
+        while True:
+            buf = ''
+            closed = False
+            response = None
+            (client, address) = self.sock.accept()
+            while not closed:
+                newdata = client.recv(1024)
+                if (newdata == b''):
+                    closed = True
+                buf += newdata.decode('ascii')
+                try:
+                    req = json.loads(buf)
+                except ValueError:
+                    continue
+                rpc = nvme.JsonRPC(self.pool)
+                response = rpc.rpc_call(req)
+                client.sendall(response.encode('ascii'))
+                client.close()
+                closed = True
+
+    def rpc_shutdown(self):
+        self.sock.close()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        os.remove(self.sockname)
+
+class ServerHandler(BaseHTTPRequestHandler):
+    key = ""
+    pool = None
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+
+    def do_AUTHHEAD(self):
+        self.send_response(401)
+        self.send_header('WWW-Authenticate', 'text/html')
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+
+    def do_INTERNALERROR(self):
+        self.send_error(500, message='Internal Server Error',
+                        explain='Failed to parse JSON RPC request')
+
+    def do_NOTFOUND(self):
+        self.send_error(404)
+
+    def do_GET(self):
+        self.send_error(501, message="Unsupported method ('%s')" % self.command)
+
+    def do_PUT(self):
+        self.send_error(501, message="Unsupported method ('%s')" % self.command)
+
+    def do_POST(self):
+        if self.path != self.directory:
+            self.do_NOTFOUND()
+            return
+        if self.key and self.headers['Authorization'] != 'Basic ' + self.key:
+            self.do_AUTHHEAD()
+        else:
+            data_string = self.rfile.read(int(self.headers['Content-Length']))
+            try:
+                req = json.loads(data_string)
+            except ValueError:
+                self.do_INTERNALERROR()
+                return
+            rpc = nvme.JsonRPC(self.pool)
+            response = rpc.rpc_call(req)
+            self.do_HEAD()
+            self.wfile.write(bytes(response.encode(encoding='ascii')))
+
+def main():
+    pool = []
+
+    parser = argparse.ArgumentParser(description='JSON RPC proxy for nvmet')
+    parser.add_argument('-s', '--socket', dest='sock', default=nvmet_sock,
+                        help="Socket to listen on, default is " + nvmet_sock)
+    parser.add_argument('-H', '--host', dest='host', help='Host address')
+    parser.add_argument('-p', '--port', dest='port', type=int, default=4260,
+                        help='Port number')
+    parser.add_argument('-U', '--user', dest='user',
+                        help='user name for authentication')
+    parser.add_argument('-P', '--password', dest='password',
+                        help='password for authentication')
+    parser.add_argument('-c', '--cert', dest='cert',
+                        help='SSL certificate')
+    parser.add_argument('-u', '--url', dest='url', default=nvmet_url,
+                        help="URL path to serve, default is " + nvmet_url)
+    parser.add_argument('-d', '--filepool', dest='filepool', action='append',
+                        help="Directory for backing files")
+    args = parser.parse_args()
+    if args.user and not args.password:
+        sys.exit("No password specified for username %s" % args.user)
+    if args.password and not args.user:
+        sys.exit("No username specified")
+    if args.user:
+        if not args.host:
+            sys.exit("Username and password are only valid for HTTP server")
+        key = base64.b64encode(bytes('%s:%s' % (args.user, args.password), 'utf-8')).decode('ascii')
+        ServerHandler.key = key
+
+    if args.url:
+        ServerHandler.directory = args.url
+
+    if args.filepool:
+        for i in args.filepool:
+            if not os.path.isdir(args.filepool[i]):
+                sys.exit("'%s' is not a directory" % args.filepool[i])
+            pool["pool%d" % i] = args.filepool[i]
+
+    ServerHandler.pool = pool
+    SocketHandler.pool = pool
+
+    if os.geteuid() != 0:
+       print("%s: must run as root." % sys.argv[0], file=sys.stderr)
+       sys.exit(-1)
+
+
+    if args.host:
+        with HTTPServer((args.host, args.port), ServerHandler) as httpd:
+            try:
+                if args.cert is not None:
+                    http.socket = ssl.wrap_socket(httpd.socket,
+                                                  certfile=args.cert,
+                                                  server_side=True)
+                print("Started JSON RPC http proxy server on %s:%d" % (args.host, args.port))
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                print("Shutting down server")
+                httpd.socket.close()
+    else:
+        with SocketHandler(args.sock) as s:
+            try:
+                print("Started JSON RPC proxy server on %s" % args.sock)
+                s.rpc_server()
+            except KeyboardInterrupt:
+                print('Shutting down server')
+                s.rpc_shutdown()
+
+if __name__ == '__main__':
+    main()

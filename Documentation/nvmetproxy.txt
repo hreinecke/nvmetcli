@@ -1,0 +1,111 @@
+nvmetproxy(8)
+===========
+
+NAME
+----
+nvmetproxy - JSON-RPC proxy server to configure NVMe-over-Fabrics Target.
+
+USAGE
+------
+[verse]
+'nvmetproxy'
+	[--socket=<socket> | -s <socket>]
+	[--host=<hostname> | -H <hostname>]
+	[--port=<port>     | -p <port>]
+	[--user=<username> | -U <username> ]
+	[--password=<password> | -P <password> ]
+	[--cert=<certfile>     | -c <certfile> ]
+	[--url=<url>           | -u <url>      ]
+
+DESCRIPTION
+-----------
+*nvmetproxy* is JSON-RPC proxy for viewing, editing, saving,
+and starting a Linux kernel NVMe Target, used for an NVMe-over-Fabrics
+network configuration.  It allows an administrator to export
+a storage resource (such as block devices, files, and volumes)
+to a local NVMe block device or expose them to remote systems
+based on the NVMe-over-Fabrics specification from http://www.nvmexpress.org.
+
+The JSON-RPC commands are compatible with the JSON-RPC commands
+the from SPDK.
+
+Connection to the daemon can be via a socket (as specified --socket)
+or via HTTP if the --host option is present.
+
+OPTIONS
+-------
+-s <socket>::
+--socket=<socket>::
+	Socket to listen on, default is /var/tmp/nvmet.sock
+
+-H <hostname>::
+--host=<hostname>::
+	Hostname to listen for HTTP requests. If specified the HTTP
+	server will started and the --socket option is ignored.
+
+-p <port>::
+--port=<port>::
+	Port number to listen for HTTP requests. Default is 4260
+
+-U <username>::
+--user=<username>::
+	Username to use for HTTP Basic Authentication. If not present
+	the HTTP server will not require authentication.
+
+-P <password>::
+--password=<password>::
+	Password to use for HTTP Basic Authentication. Must be specified
+	together with --user
+
+-c <cert>::
+--cert=<cert>::
+	SSL Server certificate to use for HTTP server. If specified the
+	HTTP server will only accept encrypted connections (https).
+
+-u <url>::
+--url=<url>::
+	URL directory to use for the configuration. Defaults to '/nvmet'
+
+
+JSON-RPC commands
+-----------------
+The proxy is compatible with the command set from the JSON-RPC calls from SPDK.
+Currently the following methods are implemented:
+
+	bdev_file_list_pools
+	bdev_file_create
+	bdev_file_delete
+	bdev_file_snapshot
+	bdev_file_clone
+	nvmf_get_interfaces
+	nvmf_create_transport
+	nvmf_get_transports
+	nvmf_create_subsystem
+	nvmf_delete_subsystem
+	nvmf_subsystem_add_ns
+	nvmf_subsystem_remove_ns
+	nvmf_subsystem_add_port
+	nvmf_subsystem_remove_port
+	nvmf_subsystem_add_host
+	nvmf_subsystem_remove_host
+	nvmf_get_subsystems
+	nvmf_port_add_ana
+	nvmf_port_set_ana
+	nvmf_port_remove_ana
+	nvmf_get_config
+	nvmf_set_config
+
+AUTHORS
+-------
+nvmetproxy was written by mailto:hare@suse.de[Hannes Reinecke]
+
+REPORTING BUGS & DEVELOPMENT
+-----------------------------
+Please send patches and bug reports to linux-nvme@lists.infradead.org
+for review and acceptance.
+
+LICENSE
+-------
+nvmetproxy is licensed under the *Apache License, Version 2.0*. Software
+distributed under this license is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either expressed or implied.
