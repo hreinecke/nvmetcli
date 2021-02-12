@@ -27,5 +27,5 @@ setup(
     maintainer_email = 'hch@lst.de',
     test_suite='nose2.collector.collector',
     packages = ['nvmet'],
-    scripts=['nvmetcli', 'nvmetproxy']
+    scripts=['nvmetcli', 'nvmetproxy', 'nvmetadm']
     )

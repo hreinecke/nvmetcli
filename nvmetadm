@@ -1,0 +1,259 @@
+#!/usr/bin/python3
+
+import sys
+import argparse
+import requests
+import json
+
+class rpc_client():
+    def bdev_file_create(self, args):
+        self.parser.add_argument('--filename', required=True)
+        self.parser.add_argument('--size', required=True)
+        self.parser.add_argument('--pool')
+        a = self.parser.parse_args(args)
+        s = a.size.lower().rfind('g')
+        if s != -1:
+            size = int(a.size.lower()[:-s]) * 1024 * 1024 * 1024
+        else:
+            s = a.size.lower().rfind('m')
+            if s != -1:
+                size = int(a.size.lower()[:-s]) * 1024 * 1024
+            else:
+                s = a.size.lower().rfind('k')
+                if s != -1:
+                    size = int(a.size.lower()[:-s]) * 1024
+                else:
+                    size = int(a.size)
+        params = {'file_name': a.filename, 'size': size}
+        if a.pool:
+            params['pool'] = a.pool
+        return params
+
+    def bdev_file_delete(self, args):
+        self.parser.add_argument('--filename', required=True)
+        self.parser.add_argument('--pool')
+        a = self.parser.parse_args(args)
+        params = {'filename': a.filename }
+        if a.pool:
+            params['pool'] = a.pool
+        return params
+
+    def nvmf_set_config(self, args):
+        self.parser.add_argument('--cfg-file', required=True)
+        a = self.parser.parse_args(args)
+        try:
+            cfg = open(a.cfg_file, "r")
+        except OSError:
+            sys.exit(1)
+        params = json.load(cfg)
+        cfg.close()
+        return params
+
+    def nvmf_create_transport(self, args):
+        self.parser.add_argument('--trtype', required=True)
+        a = self.parser.parse_args(args)
+        if not a.trtype:
+            return None
+        return {"trtype": a.trtype}
+
+    def nvmf_create_subsystem(self, args):
+        self.parser.add_argument('--nqn')
+        a = self.parser.parse_args(args)
+        params = None
+        if not a.nqn:
+            return None
+        return {"nqn": a.nqn}
+
+    def nvmf_delete_subsystem(self, args):
+        self.parser.add_argument('--nqn', required=True)
+        a = self.parser.parse_args(args)
+        return {"nqn": a.nqn}
+
+    def nvmf_subsystem_add_ns(self, args):
+        self.parser.add_argument('--nqn', required=True)
+        self.parser.add_argument('--bdev-name', required=True)
+        self.parser.add_argument('--nsid')
+        self.parser.add_argument('--nguid')
+        self.parser.add_argument('--eui64')
+        self.parser.add_argument('--uuid')
+        a = self.parser.parse_args(args)
+        ns = { 'bdev_name': a.bdev_name }
+        if a.nsid:
+            ns['nsid'] = a.nsid
+        if a.nguid:
+            ns['nguid'] = a.nguid
+        if a.eui64:
+            ns['eui64'] = a.eui64
+        if a.uuid:
+            ns['uuid'] = a.uuid
+        return {"nqn": a.nqn, 'namespace': ns}
+
+    def nvmf_subsystem_remove_ns(self, args):
+        self.parser.add_argument('--nqn', required=True)
+        self.parser.add_argument('--nsid', required=True, type=int)
+        a = self.parser.parse_args(args)
+        return {'nqn': a.nqn, 'nsid': a.nsid }
+
+    def nvmf_subsystem_port(self, args):
+        self.parser.add_argument('--nqn', required=True)
+        self.parser.add_argument('--portid', type=int)
+        self.parser.add_argument('--trtype', required=True)
+        self.parser.add_argument('--traddr', required=True)
+        self.parser.add_argument('--adrfam')
+        self.parser.add_argument('--trscvid')
+        self.parser.add_argument('--host-traddr')
+        a = self.parser.parse_args(args)
+        port = { 'trtype': a.trtype, 'traddr': a.traddr }
+        if a.portid:
+            port['portid'] = a.portid
+        if a.adrfam:
+            port['adrfam'] = a.adrfam
+        if a.trscvid:
+            port['trsvcid'] = a.trscvid
+        if a.host_traddr:
+            port['host_traddr'] = a.host_traddr
+        return {"nqn": a.nqn, 'port': port}
+
+    def nvmf_subsystem_host(self, args):
+        self.parser.add_argument('--nqn', required=True)
+        self.parser.add_argument('--host', required=True)
+        a = self.parser.parse_args(args)
+        return {'nqn': a.nqn, 'host': a.host }
+
+    def nvmf_port_ana(self, args):
+        self.parser.add_argument('--portid', required=True)
+        self.parser.add_argument('--grpid')
+        self.parser.add_argument('--ana_state')
+        a = self.parser.parse_args(args)
+        params = { 'portid': a.portid }
+        if a.grpid:
+            params['grpid'] = a.grpid
+        if a.ana_state:
+            params['ana_state'] = a.ana_state
+        return params
+
+    def method_no_param(self, args = None):
+        a = self.parser.parse_args(args)
+        return
+
+    _rpc_methods = dict(bdev_file_list_pools=method_no_param,
+                        bdev_file_create=bdev_file_create,
+                        bdev_file_delete=bdev_file_delete,
+                        nvmf_get_config=method_no_param,
+                        nvmf_set_config=nvmf_set_config,
+                        nvmf_get_interfaces=method_no_param,
+                        nvmf_create_transport=nvmf_create_transport,
+                        nvmf_get_transports=method_no_param,
+                        nvmf_create_subsystem=nvmf_create_subsystem,
+                        nvmf_delete_subsystem=nvmf_delete_subsystem,
+                        nvmf_subsystem_add_ns= nvmf_subsystem_add_ns,
+                        nvmf_subsystem_remove_ns=nvmf_subsystem_remove_ns,
+                        nvmf_subsystem_add_port=nvmf_subsystem_port,
+                        nvmf_subsystem_remove_port=nvmf_subsystem_port,
+                        nvmf_subsystem_add_host=nvmf_subsystem_host,
+                        nvmf_subsystem_remove_host=nvmf_subsystem_host,
+                        nvmf_port_add_ana=nvmf_port_ana,
+                        nvmf_port_set_ana=nvmf_port_ana,
+                        nvmf_port_remove_ana=nvmf_port_ana,
+                        nvmf_get_subsystems=method_no_param)
+
+    def __init__(self, method):
+        if method not in self._rpc_methods:
+            print("Invalid rpc method '%s'; must be one of" % method)
+            print(", ".join([x for x in list(self._rpc_methods)]))
+            sys.exit(1)
+                
+        self.parser = argparse.ArgumentParser(prog="nvmetadm %s" % method)
+        self._method = self._rpc_methods[method]
+
+    def _error(self, err):
+        data = None
+        if 'code' not in err:
+            code = -32000
+            message = "Server error"
+            data = []
+            data.append("Invalid JSON RPC response")
+        else:
+            code = err['code']
+        if 'message' in err:
+            message = err['message']
+        else:
+            if code == -32700:
+                message = "Parse error"
+            elif code == -32600:
+                message = "Invalid Request"
+            elif code == -32601:
+                message = "Method not found"
+            elif code == -32602:
+                message = "Invalid params"
+            elif code == -32603:
+                message = "Internal error"
+            elif code <= -32000 and code > -32100:
+                message = "Server error"
+            else:
+                data = []
+                data.append("Invalid JSON RPC error code %d" & code)
+                code = -32001
+                message = "Server error"
+        if 'data' in err:
+            data = err['data']
+        return (code, message, data)
+
+    def call(self, args):
+        return self._method(self, args)
+
+    def response(self, response):
+        if 'error' in response:
+            (code, message, data) = self._error(response['error'])
+            if data:
+                sys.exit("JSON RPC error %d: %s\n%s" % (code, message, json.dumps(data)))
+            else:
+                sys.exit("JSON RPC error %d: %s" % (code, message))
+        elif 'result' not in response:
+            sys.exit("JSON RPC error: Not a valid response\n%s", response)
+        elif response['result']:
+            return response['result']
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-H', '--host', help='Hostname to connect to',
+                        required=True)
+    parser.add_argument('-p', '--port', type=int, default=4260,
+                        help='Port number for the connection')
+    parser.add_argument('-U', '--username')
+    parser.add_argument('-P', '--password')
+    parser.add_argument('-u', '--uri', default='nvmet',
+                        help='URI of the JSON-RPC namespace')
+    (a, args) = parser.parse_known_args()
+    if a.username:
+        if not a.password:
+            sys.exit("Need to specify both username and password")
+        auth = (a.username, a.password)
+    elif not a.password:
+        auth = None
+    else:
+        sys.exit("Need to specify both username and password")
+    url = "http://%s:%d/%s" % (a.host, a.port, a.uri)
+
+    if not args or not len(args):
+        sys.exit("No method given")
+
+    method = args.pop(0)
+    payload = {
+        "method": method,
+        "jsonrpc": "2.0",
+        "id": 0,
+    }
+    rpc = rpc_client(method)
+    params = rpc.call(args)
+    if params:
+        payload['params'] = params
+    response = requests.post(url, auth=auth,json=payload)
+    response.raise_for_status()
+    msg = rpc.response(response.json())
+    if msg:
+        print("%s" % json.dumps(msg, indent=2))
+
+
+if __name__ == "__main__":
+    main()
