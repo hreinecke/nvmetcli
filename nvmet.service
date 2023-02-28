@@ -1,7 +1,8 @@
 [Unit]
 Description=Restore NVMe kernel target configuration
 Requires=sys-kernel-config.mount
-After=sys-kernel-config.mount network.target local-fs.target
+After=sys-kernel-config.mount network-online.target local-fs.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
