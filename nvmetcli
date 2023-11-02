@@ -128,7 +128,7 @@ class UISubsystemsNode(UINode):
 
     def ui_command_create(self, nqn=None):
         '''
-        Creates a new target. If I{nqn} is ommited, then the new Subsystem
+        Creates a new target. If I{nqn} is omitted, then the new Subsystem
         will be created using a randomly generated NQN.
 
         SEE ALSO
@@ -187,7 +187,7 @@ class UINamespacesNode(UINode):
 
     def ui_command_create(self, nsid=None):
         '''
-        Creates a new namespace. If I{nsid} is ommited, then the next
+        Creates a new namespace. If I{nsid} is omitted, then the next
         available namespace id will be used.
 
         SEE ALSO

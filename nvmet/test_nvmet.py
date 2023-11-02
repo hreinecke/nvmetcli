@@ -321,7 +321,7 @@ class TestNvmet(unittest.TestCase):
         self.assertEqual(r2, r)
         self.assertEqual(len(list(p.referrals)), 2)
 
-        # non-existant lookup
+        # non-existent lookup
         self.assertRaises(nvme.CFSError, nvme.Referral, p, name="foo",
                           mode='lookup')
 
