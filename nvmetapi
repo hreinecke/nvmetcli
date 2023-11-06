@@ -1,0 +1,603 @@
+#!/usr/bin/python3
+
+import os, json
+from flask import Flask, request
+from flask_restful import abort, Api, Resource
+import nvmet as nvme
+
+app = Flask(__name__)
+api = Api(app)
+nvmet_root = nvme.Root()
+
+NVMET_PREFIX = '/nvmet'
+
+def payload_to_json(v=None):
+    data = request.get_data(as_text=True)
+    try:
+        val = json.loads(data)
+    except:
+        abort(400, message="Invalid JSON data '{}'".format(data))
+    if not v:
+        return val
+    if v not in val:
+        abort(431, message="No '{}' field JSON data".format(v))
+    if not val[v] or not len(val[v]):
+        abort(400, message="Empty '{}' field in JSON data".format(v))
+    return val
+
+# Host
+# handling nvmet/hosts/<nqn>
+class Host(Resource):
+    def get(self, nqn):
+        try:
+            host = nvme.Host(nqn, mode='lookup')
+        except nvme.nvme.CFSError:
+            abort(404, message=f'Host {nqn} does not exist')
+        return host.dump()
+
+    def put(self, nqn):
+        try:
+            host = nvme.Host(nqn, mode='any')
+        except nvme.nvme.CFSError as e:
+            abort(404, message=f'Cannot create host {nqn}: {e}')
+        return '', 201
+
+    def delete(self, nqn):
+        try:
+            host = nvme.Host(nqn, mode='lookup')
+        except nvme.nvme.CFSError:
+            abort(404, message=f'Host {nqn} does not exist')
+        try:
+            host.delete()
+        except nvme.nvme.CFSError as e:
+            abort(409, message=f'Failed to delete host {nqn}: {e}')
+        return '', 204
+
+# Hosts
+# handling nvmet/hosts
+class Hosts(Resource):
+    def get(self):
+        entry = [h.nqn for h in nvmet_root.hosts]
+        return entry
+
+    def put(self):
+        def err_func(err_str):
+            abort(409, message=f'{err_str}')
+        val = payload_to_json('nqn')
+        nqn = val['nqn']
+        nvme.Host.setup(val, err_func)
+        return val, 201
+
+class _Port(Resource):
+    def _lookup(self, portid):
+        try:
+            port = nvme.Port(portid, mode='lookup')
+        except nvme.nvme.CFSError:
+            abort(404, message=f'Port {portid} does not exist')
+        return port
+
+    def _get_attr(self, portid, group, addr):
+        port = self._lookup(portid)
+        try:
+            return port.get_attr(group,addr)
+        except:
+            abort(404, message=f'Port {portid} has no attribute {group}_{addr}')
+
+    def _set_attr(self, portid, group, addr):
+        port = self._lookup(portid)
+        val = request.get_data(as_text=True)
+        try:
+            port.set_attr(group, addr, val)
+        except:
+            abort(409, message=f'Failed to modify port {portid} attribute {group}_{addr}')
+        return val, 201
+
+# PortSubsystem
+# handling nvmet/ports/<portid>/subsystems/<nqn>
+class PortSubsystem(_Port):
+    def delete(self, portid, nqn):
+        port = self._lookup(portid)
+        try:
+            port.remove_subsystem(nqn)
+        except nvme.nvme.CFSError as e:
+            abort(404, message=f'Failed to remove subsystem {nqn} from port {portid}: {e}')
+        return '', 204
+
+    def put(self, portid, nqn):
+        port = self._lookup(portid)
+        try:
+            port.add_subsystem(nqn)
+        except nvme.nvme.CFSError as e:
+            abort(409, message=f'Failed to add NQN {nqn} to port {portid}: {e}')
+        return nqn, 201
+
+# PortSubsystems
+# handling nvmet/ports/<portid>/subsystems
+class PortSubsystems(_Port):
+    def get(self, portid):
+        port = self._lookup(portid)
+        entry = []
+        for s in port.subsystems:
+            entry.append(s)
+        return entry
+
+    def put(self, portid):
+        port = self._lookup(portid)
+        nqn = request.get_data(as_text=True)
+        if not nqn or not len(nqn):
+            abort(400, message="Empty NQN in data payload")
+        try:
+            port.add_subsystem(nqn)
+        except nvme.nvme.CFSError as e:
+            abort(409, message=f'Failed to add NQN {nqn} to port {portid}: {e}')
+        return nqn, 201
+
+# PortANAGroups
+# handling nvmet/ports/<portid>/ana_groups
+class PortANAGroups(_Port):
+    def get(self, portid):
+        port = self._lookup(portid)
+        return [a.grpid for a in port.ana_groups]
+
+# PortANAGroup
+# handling nvmet/ports/<portid>/ana_groups/<grpid>
+class PortANAGroup(_Port):
+    def get(self, portid, grpid):
+        port = self._lookup(portid)
+        for a in port.ana_groups:
+            if a.grpid == int(grpid):
+                return a.dump()
+        abort(404, message=f'Port {portid} has no ana group {grpid}')
+
+    def put(self, portid, grpid):
+        port = self._lookup(portid)
+        try:
+            a = nvme.ANAGroup(port, grpid)
+        except nvme.nvme.CFSERROR:
+            abort(400, message=f'Cannot create port {portid} ana group {grpid}')
+        return a.dump(), 201
+
+    def delete(self, portid, grpid):
+        if int(grpid) == 1:
+            abort(403, message=f'Cannot remove ana group {grpid}')
+        port = self._lookup(portid)
+        for a in port.ana_groups:
+            if a.grpid == int(grpid):
+                a.delete()
+                return '', 204
+        abort(404, message=f'Port {portid} has no ana group {grpid}')
+
+# PortANAGroupState
+# handling nvmet/ports/<portid>/ana_groups/<grpid>/ana_state
+class PortANAGroupState(_Port):
+    def get(self, portid, grpid):
+        port = self._lookup(portid)
+        for a in port.ana_groups:
+            if a.grpid == int(grpid):
+                return a.get_attr('ana','state')
+        abort(404, message=f'Port {portid} has no ana group {grpid}')
+
+    def patch(self, portid, grpid):
+        port = self._lookup(portid)
+        val = request.get_data(as_text=True)
+        if not val or not len(val):
+            abort(400, message=f'Empty data payload')
+        for a in port.ana_groups:
+            if a.grpid == int(grpid):
+                try:
+                    a.set_attr('ana', 'state', val)
+                except:
+                    abort(400, message=f'Failed to set ana state to {val}')
+                return val, 201
+        abort(404, message=f'Port {portid} has no ana group {grpid}')
+
+# PortReferrals
+# handling nvmet/ports/<portid>/referrals
+class PortReferrals(_Port):
+    def get(self, portid):
+        port = self._lookup(portid)
+        return [r.name for r in port.referrals]
+
+    def put(self, portid):
+        def err_func(err_str):
+            abort(409, message=f'{err_str}')
+        port = self._lookup(portid)
+        args = payload_to_json('name')
+        if not args:
+            abort(400, message='No data payload')
+        nvme.Referral.setup(port, args, err_func)
+        for r in port.referrals:
+            if r.name == args['name']:
+                return r.dump()
+        abort(404, message=f'Failed to create referral {args["name"]}')
+
+# PortReferral
+# handling nvmet/ports/<portid>/referral/<name>
+class PortReferral(_Port):
+    def get(self, portid, name):
+        port = self._lookup(portid)
+        for r in port.referrals:
+            if r.name == name:
+                return r.dump()
+        abort(404, message=f'Port {portid} has no referral {name}')
+
+    def put(self, portid, name):
+        port = self._lookup(portid)
+        r = nvme.Referral(port, portid)
+        return r.dump(), 201
+
+    def delete(self, portid, name):
+        port = self._lookup(portid)
+        for r in port.referrals:
+            if r.name == name:
+                r.delete()
+                return '', 204
+        abort(404, message=f'Failed to remove referral {name}')
+
+# PortAddrs
+# handling nvmet/ports/<portid>/addr
+class PortAddrs(_Port):
+    def get(self, portid):
+        port = self._lookup(portid)
+        entry = {}
+        for i in port.list_attrs('addr', writable=True):
+            entry[str(i)] = port.get_attr('addr', i)
+        return entry
+
+# PortAddr
+# handling nvmet/ports/<portid>/addr_<addr>
+class PortAddr(_Port):
+    def get(self, portid, addr):
+        return self._get_attr(portid, 'addr', addr)
+
+    def put(self, portid, addr):
+        return self._set_attr(portid, 'addr', addr)
+
+# PortParams
+# handling nvmet/ports/<portid>/param
+class PortParams(_Port):
+    def get(self, portid):
+        port = self._lookup(portid)
+        entry = {}
+        for i in port.list_attrs('param', writable=True):
+            entry[str(i)] = port.get_attr('param', i)
+        return entry
+
+# PortParam
+# handling nvmet/ports/<portid>/param_<param>
+class PortParam(_Port):
+    def get(self, portid, param):
+        return self._get_attr(portid, 'param', param)
+
+    def patch(self, portid, param):
+        return self._set_attr(portid, 'param', param)
+
+# Port
+# handling nvmet/ports/<portid>
+class Port(_Port):
+    def get(self, portid):
+        port = self._lookup(portid)
+        return port.dump()
+
+    def put(self, portid):
+        try:
+            port = nvme.Port(portid, mode='any')
+        except nvme.nvme.CFSError as e:
+            abort(404, message=f'Cannot create port {portid}: {e}')
+        return '', 201
+
+    def delete(self, portid):
+        port = self._lookup(portid)
+        try:
+            port.delete()
+        except nvme.nvme.CFSError as e:
+            abort(409, message=f'Failed to remove port {portid}: {e}')
+        return '', 204
+
+    def patch(self, portid):
+        def err_func(err_str):
+            abort(409, message=f'{err_str}')
+        port = self._lookup(portid)
+        args = payload_to_json()
+        port._setup_attrs(args, err_func)
+        for s in args.get('subsystems', []):
+            try:
+                port.add_subsystem(s)
+            except nvme.nvme.CFSError as e:
+                abort(409, message=f'Failed to add subsystem {s} to port {portid}: {e}')
+        for a in args.get('ana_groups', []):
+            nvme.ANAGroup.setup(port, a, err_func)
+        for r in args.get('referrals', []):
+            nvme.Referral.setup(port, r, err_func)
+        return args, 201
+
+# Ports
+# handling nvmet/ports
+class Ports(Resource):
+    def get(self):
+        entry = [p.portid for p in nvmet_root.ports]
+        return entry
+
+    def put(self):
+        def err_func(err_str):
+            abort(409, message=f'{err_str}')
+        args = payload_to_json('portid')
+        nvme.Port.setup(nvmet_root, args, err_func)
+        port = []
+        for p in nvmet_root.ports:
+            if p.portid == int(args['portid']):
+                return port.dump(), 201
+        abort(404, message=f'Failed to create port {portid}')
+
+class _Subsystem(Resource):
+    def _lookup(self, nqn):
+        try:
+            subsys = nvme.Subsystem(nqn, mode='lookup')
+        except nvme.nvme.CFSError:
+            abort(404, message=f'Subsystem {nqn} does not exist')
+        return subsys
+
+# SubsystemNamespaceDevice
+# handling nvmet/subsystems/<nqn/namespaces/<nsid>/device_<attr>
+class SubsystemNamespaceDevice(_Subsystem):
+    def get(self, nqn, nsid, attr):
+        subsys = self._lookup(nqn)
+        ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        try:
+            return ns.get_attr('device', attr)
+        except:
+            abort(404, message=f'Namespace {nsid} has no device attribute {attr}')
+
+    def put(self, nqn, nsid, attr):
+        subsys = self._lookup(nqn)
+        ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        if not ns:
+            abort(404, message=f'Subsystem {nqn} has no namespace {nsid}')
+        val = request.get_data(as_text=True)
+        try:
+            ns.set_attr('device', attr, val)
+        except:
+            abort(409, message=f'Failed to modify namespace {nsid} device attribute {attr}')
+        return val, 201
+
+# SubsystemNamespaceDevices
+# handling nvmet/subsystems/<nqn>/namespaces/<nsid>/device
+class SubsystemNamespaceDevices(_Subsystem):
+    def get(self, nqn, nsid):
+        subsys = self._lookup(nqn)
+        ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        entry = {}
+        for i in ns.list_attrs('device', writable=True):
+            entry[str(i)] = ns.get_attr('device', i)
+        return entry
+
+# SubsystemNamespaceANAGroup
+# handling nvmet/subsystems/<nqn/namespaces/<nsid>/ana/<attr>
+class SubsystemNamespaceANAGroup(_Subsystem):
+    def get(self, nqn, nsid, attr):
+        subsys = self._lookup(nqn)
+        ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        try:
+            return ns.get_attr('ana', attr)
+        except:
+            abort(404, message=f'Namespace {nsid} has no ana attribute {attr}')
+
+    def put(self, nqn, nsid, attr):
+        subsys = self._lookup(nqn)
+        ns = nvme.Namespace( subsys, nsid, mode='lookup')
+        val = request.get_data(as_text=True)
+        if not val or not len(val):
+            abort(400, message=f'Empty data is not allowed')
+        try:
+            ns.set_attr('ana', attr, val)
+        except nvme.nvme.CFSNotFound:
+            abort(404, message=f'Namespace {nsid} has not ana attribute {attr}')
+        except nvme.nvme.CFSError:
+            abort(400, message=f'Failed to set namespace {nsid} ana attribute {attr}')
+
+        return ns.get_attr('ana', attr)
+
+# SubsystemNamespaceANAGroups
+# handling nvmet/subsystems/<nqn>/namespaces/<nsid>/ana
+class SubsystemNamespaceANAGroups(_Subsystem):
+    def get(self, nqn, nsid):
+        subsys = self._lookup(nqn)
+        ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        entry = {}
+        for i in ns.list_attrs('ana', writable=True):
+            entry[str(i)] = ns.get_attr('ana', i)
+        return entry
+
+# SubsystemNamespaceEnable
+# handling nvmet/subsystems/<nqn/namespaces/<nsid>/enable
+class SubsystemNamespaceEnable(_Subsystem):
+    def get(self, nqn, nsid):
+        subsys = self._lookup(nqn)
+        ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        try:
+            return ns.get_enable()
+        except:
+            abort(404, message=f'Namespace {nsid} has no enable attribute')
+
+    def put(self, nqn, nsid):
+        subsys = self._lookup(nqn)
+        val = request.get_data(as_text=True)
+        ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        try:
+            ns.set_enable(val)
+        except:
+            abort(404, message=f'Namespace {nsid} cannot modify attribute enable')
+        return ns.get_enable()
+
+# SubsystemNamespace
+# handling nvmet/subsystems/<nqn/namespaces/<nsid>
+class SubsystemNamespace(_Subsystem):
+    def put(self, nqn, nsid):
+        subsys = self._lookup(nqn)
+        try:
+            ns = nvme.Namespace(subsys, nsid, mode='any')
+        except nvme.nvme.CFSError:
+            abort(409, message=f'Failed to create namespace {nsid}')
+        return ns.dump(), 201
+
+    def get(self, nqn, nsid):
+        subsys = self._lookup(nqn)
+        try:
+            ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        except nvme.nvme.CFSNotFound:
+            abort(404, message=f'Namespace {nsid} does not exist')
+        return ns.dump()
+
+    def delete(self, nqn, nsid):
+        subsys = self._lookup(nqn)
+        ns = nvme.Namespace(subsys, nsid, mode='lookup')
+        if ns:
+            try:
+                ns.delete()
+            except nvme.nvme.CFSError as e:
+                abort(405, message=f'Failed to delete namespace {nsid}: {e}')
+
+# SubsystemNamespaces
+# handling nvmet/subsystems/<nqn>/namespaces
+class SubsystemNamespaces(_Subsystem):
+    def get(self, nqn):
+        subsys = self._lookup(nqn)
+        entry = [ns.nsid for ns in subsys.namespaces]
+        return entry
+
+# SubsystemAllowedHost
+# handling nvmet/subsystems/<nqn>/allowed_hosts/<hostnqn>
+class SubsystemAllowedHost(_Subsystem):
+    def put(self, nqn, hostnqn):
+        subsys = self._lookup(nqn)
+        try:
+            subsys.add_allowed_host(hostnqn)
+        except nvme.nvme.CFSError:
+            abort(409, message=f'Failed to add host {hostnqn} to subsystem {nqn}')
+
+    def delete(self, nqn, hostnqn):
+        subsys = self._lookup(nqn)
+        try:
+            subsys.remove_allowed_host(hostnqn)
+        except nvme.nvme.CFSError:
+            abort(409, message=f'Failed to remove host {hostnqn} from subsystem {nqn}')
+
+# SubsystemAllowedHosts
+# handling nvmet/subsystems/<nqn>/allowed_hosts
+class SubsystemAllowedHosts(_Subsystem):
+    def get(self, nqn):
+        subsys = self._lookup(nqn)
+        return subsys.allowed_hosts
+
+# SubsystemAttr
+# handling nvmet/subsystems/<nqn>/attr/<attr>
+class SubsystemAttr(_Subsystem):
+    def get(self, nqn, attr):
+        subsys = self._lookup(nqn)
+        try:
+            return subsys.get_attr('attr', attr)
+        except:
+            abort(404, message=f'Subsystem {nqn} has no attribute {attr}')
+
+    def put(self, nqn, attr):
+        subsys = self._lookup(nqn)
+        val = request.get_data(as_text=True)
+        try:
+            subsys.set_attr('attr', attr, val)
+        except:
+            abort(404, message=f'Subsystem {nqn} can not modify attribute {attr}')
+        return subsys.get_attr('attr', attr)
+
+# SubsystemAttrs
+# handling nvmet/subsystems/<nqn>/attr
+class SubsystemAttrs(_Subsystem):
+    def get(self, nqn):
+        subsys = self._lookup(nqn)
+        entry = {}
+        for i in subsys.list_attrs('attr', writable=True):
+            entry[str(i)] = subsys.get_attr('attr', i)
+        return entry
+
+# Subsystem
+# handling nvmet/subsystems/<nqn>
+class Subsystem(_Subsystem):
+    def get(self, nqn):
+        subsys = self._lookup(nqn)
+        return subsys.dump()
+
+    def put(self, nqn):
+        try:
+            subsys = nvme.Subsystem(nqn, mode='any')
+        except nvme.nvme.CFSError as e:
+            abort(404, message=f'Cannot create subsystem {nqn}: {e}')
+        return '', 201
+
+    def delete(self, nqn):
+        subsys = self._lookup(nqn)
+        try:
+            subsys.delete()
+        except nvme.nvme.CFSError as e:
+            abort(405, message=f'Failed to delete subsystem {nqn}: {e}')
+        return '', 204
+
+# Subsystems
+# handling nvmet/subsystems
+class Subsystems(Resource):
+    def get(self):
+        entry = [s.nqn for s in nvmet_root.subsystems]
+        return entry
+
+    def put(self):
+        def err_func(err_str):
+            abort(409, message=f'{err_str}')
+        args = payload_to_json('nqn')
+        nqn = args['nqn']
+        nvme.Subsystem.setup(nvmet_root, args, err_func);
+        subsys = []
+        for s in nvmet_root.subsystems:
+            if s.nqn == nqn:
+                subsys = s
+                break
+        if not subsys:
+            abort(409, message=f'Failed to create subsystem {nqn}')
+        return subsys.dump(), 201
+
+class Nvmet(Resource):
+    def get(self):
+        return nvmet_root.dump()
+
+##
+## Actually setup the Api resource routing here
+##
+api.add_resource(Nvmet, f'{NVMET_PREFIX}')
+api.add_resource(Hosts, f'{NVMET_PREFIX}/hosts')
+api.add_resource(Host, f'{NVMET_PREFIX}/hosts/<nqn>')
+api.add_resource(Ports, f'{NVMET_PREFIX}/ports')
+api.add_resource(Port, f'{NVMET_PREFIX}/ports/<portid>')
+api.add_resource(PortAddrs, f'{NVMET_PREFIX}/ports/<portid>/addr')
+api.add_resource(PortAddr, f'{NVMET_PREFIX}/ports/<portid>/addr_<addr>')
+api.add_resource(PortParams, f'{NVMET_PREFIX}/ports/<portid>/param')
+api.add_resource(PortParam, f'{NVMET_PREFIX}/ports/<portid>/param_<param>')
+api.add_resource(PortANAGroups, f'{NVMET_PREFIX}/ports/<portid>/ana_groups')
+api.add_resource(PortANAGroup, f'{NVMET_PREFIX}/ports/<portid>/ana_groups/<grpid>')
+api.add_resource(PortANAGroupState, f'{NVMET_PREFIX}/ports/<portid>/ana_groups/<grpid>/ana_state')
+api.add_resource(PortReferrals, f'{NVMET_PREFIX}/ports/<portid>/referrals')
+api.add_resource(PortReferral, f'{NVMET_PREFIX}/ports/<portid>/referrals/<name>')
+api.add_resource(PortSubsystems, f'{NVMET_PREFIX}/ports/<portid>/subsystems')
+api.add_resource(PortSubsystem, f'{NVMET_PREFIX}/ports/<portid>/subsystems/<nqn>')
+api.add_resource(Subsystems, f'{NVMET_PREFIX}/subsystems')
+api.add_resource(Subsystem, f'{NVMET_PREFIX}/subsystems/<nqn>')
+api.add_resource(SubsystemAttrs, f'{NVMET_PREFIX}/subsystems/<nqn>/attr')
+api.add_resource(SubsystemAttr, f'{NVMET_PREFIX}/subsystems/<nqn>/attr_<attr>')
+api.add_resource(SubsystemAllowedHosts, f'{NVMET_PREFIX}/subsystems/<nqn>/allowed_hosts')
+api.add_resource(SubsystemAllowedHost, f'{NVMET_PREFIX}/subsystems/<nqn>/allowed_hosts/<hostnqn>')
+api.add_resource(SubsystemNamespaces, f'{NVMET_PREFIX}/subsystems/<nqn>/namespaces')
+api.add_resource(SubsystemNamespace, f'{NVMET_PREFIX}/subsystems/<nqn>/namespaces/<nsid>')
+api.add_resource(SubsystemNamespaceEnable, f'{NVMET_PREFIX}/subsystems/<nqn>/namespaces/<nsid>/enable')
+api.add_resource(SubsystemNamespaceDevices, f'{NVMET_PREFIX}/subsystems/<nqn>/namespaces/<nsid>/device')
+api.add_resource(SubsystemNamespaceDevice, f'{NVMET_PREFIX}/subsystems/<nqn>/namespaces/<nsid>/device_<attr>')
+api.add_resource(SubsystemNamespaceANAGroups, f'{NVMET_PREFIX}/subsystems/<nqn>/namespaces/<nsid>/ana')
+api.add_resource(SubsystemNamespaceANAGroup, f'{NVMET_PREFIX}/subsystems/<nqn>/namespaces/<nsid>/ana_<attr>')
+
+if __name__ == '__main__':
+    app.run(debug=True)
