@@ -47,10 +47,11 @@ class CFSNotFound(CFSError):
 
 class CFSNode(object):
 
-    configfs_dir = '/sys/kernel/config/nvmet'
+    configfs_dir = '/sys/kernel/config'
+    nvmet_prefix = '/nvmet'
 
     def __init__(self):
-        self._path = self.configfs_dir
+        self._path = self.nvmet_prefix
         self._enable = None
         self.attr_groups = []
 
@@ -61,7 +62,7 @@ class CFSNode(object):
         return self._path != other._path
 
     def _get_path(self):
-        return self._path
+        return f'{self.configfs_dir}/{self._path}'
 
     def _create_in_cfs(self, mode):
         '''
@@ -78,7 +79,7 @@ class CFSNode(object):
                            self.__class__.__name__)
         elif not self.exists and mode == 'lookup':
             raise CFSNotFound("No such %s in configfs: %s" %
-                              (self.__class__.__name__, self.path))
+                              (self.__class__.__name__, self._path))
 
         if not self.exists:
             try:
@@ -108,7 +109,7 @@ class CFSNode(object):
         self._check_self()
 
         names = [os.path.basename(name).split('_', 1)[1]
-                 for name in glob("%s/%s_*" % (self._path, group))
+                 for name in glob("%s/%s_*" % (self.path, group))
                      if os.path.isfile(name)]
 
         if writable is True:
@@ -122,7 +123,7 @@ class CFSNode(object):
         return names
 
     def _attr_is_writable(self, group, name):
-        s = os.stat("%s/%s_%s" % (self._path, group, name))
+        s = os.stat("%s/%s_%s" % (self.path, group, name))
         return s[stat.ST_MODE] & stat.S_IWUSR
 
     def set_attr(self, group, attribute, value):
@@ -241,7 +242,7 @@ class Root(CFSNode):
             raise CFSError("%s does not exist.  Giving up." %
                            self.configfs_dir)
 
-        self._path = self.configfs_dir
+        self._path = self.nvmet_prefix
         self._create_in_cfs('lookup')
 
     def _modprobe(self, modname):
@@ -263,7 +264,7 @@ class Root(CFSNode):
     def _list_subsystems(self):
         self._check_self()
 
-        for d in os.listdir("%s/subsystems/" % self._path):
+        for d in os.listdir("%s/subsystems/" % self.path):
             yield Subsystem(d, 'lookup')
 
     subsystems = property(_list_subsystems,
@@ -272,7 +273,7 @@ class Root(CFSNode):
     def _list_ports(self):
         self._check_self()
 
-        for d in os.listdir("%s/ports/" % self._path):
+        for d in os.listdir("%s/ports/" % self.path):
             yield Port(d, 'lookup')
 
     ports = property(_list_ports,
@@ -281,7 +282,7 @@ class Root(CFSNode):
     def _list_hosts(self):
         self._check_self()
 
-        for h in os.listdir("%s/hosts/" % self._path):
+        for h in os.listdir("%s/hosts/" % self.path):
             yield Host(h, 'lookup')
 
     hosts = property(_list_hosts,
@@ -433,7 +434,7 @@ class Subsystem(CFSNode):
 
         self.nqn = nqn
         self.attr_groups = ['attr']
-        self._path = "%s/subsystems/%s" % (self.configfs_dir, nqn)
+        self._path = "%s/subsystems/%s" % (self.nvmet_prefix, nqn)
         self._create_in_cfs(mode)
 
     def _generate_nqn(self):
@@ -456,7 +457,7 @@ class Subsystem(CFSNode):
 
     def _list_namespaces(self):
         self._check_self()
-        for d in os.listdir("%s/namespaces/" % self._path):
+        for d in os.listdir("%s/namespaces/" % self.path):
             yield Namespace(self, int(d), 'lookup')
 
     namespaces = property(_list_namespaces,
@@ -464,7 +465,7 @@ class Subsystem(CFSNode):
 
     def _list_allowed_hosts(self):
         return [os.path.basename(name)
-                for name in os.listdir("%s/allowed_hosts/" % self._path)]
+                for name in os.listdir("%s/allowed_hosts/" % self.path)]
 
     allowed_hosts = property(_list_allowed_hosts,
                              doc="Get the list of Allowed Hosts for the Subsystem.")
@@ -474,8 +475,8 @@ class Subsystem(CFSNode):
         Enable access for the host identified by I{nqn} to the Subsystem
         '''
         try:
-            os.symlink("%s/hosts/%s" % (self.configfs_dir, nqn),
-                       "%s/allowed_hosts/%s" % (self._path, nqn))
+            os.symlink("%s%s/hosts/%s" % (self.configfs_dir, self.nvmet_prefix, nqn),
+                       "%s/allowed_hosts/%s" % (self.path, nqn))
         except Exception as e:
             raise CFSError("Could not symlink %s in configFS: %s" % (nqn, e))
 
@@ -484,7 +485,7 @@ class Subsystem(CFSNode):
         Disable access for the host identified by I{nqn} to the Subsystem
         '''
         try:
-            os.unlink("%s/allowed_hosts/%s" % (self._path, nqn))
+            os.unlink("%s/allowed_hosts/%s" % (self.path, nqn))
         except Exception as e:
             raise CFSError("Could not unlink %s in configFS: %s" % (nqn, e))
 
@@ -570,7 +571,7 @@ class Namespace(CFSNode):
         self.attr_groups = ['device', 'ana']
         self._subsystem = subsystem
         self._nsid = nsid
-        self._path = "%s/namespaces/%d" % (self.subsystem.path, self.nsid)
+        self._path = "%s/namespaces/%d" % (self.subsystem._path, self.nsid)
         self._create_in_cfs(mode)
 
     def _get_subsystem(self):
@@ -644,7 +645,7 @@ class Port(CFSNode):
 
         self.attr_groups = ['addr', 'param']
         self._portid = int(portid)
-        self._path = "%s/ports/%d" % (self.configfs_dir, self._portid)
+        self._path = "%s/ports/%d" % (self.nvmet_prefix, self._portid)
         self._create_in_cfs(mode)
 
     def _get_portid(self):
@@ -654,7 +655,7 @@ class Port(CFSNode):
 
     def _list_subsystems(self):
         return [os.path.basename(name)
-                for name in os.listdir("%s/subsystems/" % self._path)]
+                for name in os.listdir("%s/subsystems/" % self.path)]
 
     subsystems = property(_list_subsystems,
                           doc="Get the list of Subsystem for this Port.")
@@ -664,8 +665,8 @@ class Port(CFSNode):
         Enable access to the Subsystem identified by I{nqn} through this Port.
         '''
         try:
-            os.symlink("%s/subsystems/%s" % (self.configfs_dir, nqn),
-                       "%s/subsystems/%s" % (self._path, nqn))
+            os.symlink("%s%s/subsystems/%s" % (self.configfs_dir, self.nvmet_prefix, nqn),
+                       "%s/subsystems/%s" % (self.path, nqn))
         except Exception as e:
             raise CFSError("Could not symlink %s in configFS: %s" % (nqn, e))
 
@@ -674,7 +675,7 @@ class Port(CFSNode):
         Disable access to the Subsystem identified by I{nqn} through this Port.
         '''
         try:
-            os.unlink("%s/subsystems/%s" % (self._path, nqn))
+            os.unlink("%s/subsystems/%s" % (self.path, nqn))
         except Exception as e:
             raise CFSError("Could not unlink %s in configFS: %s" % (nqn, e))
 
@@ -693,7 +694,7 @@ class Port(CFSNode):
 
     def _list_referrals(self):
         self._check_self()
-        for d in os.listdir("%s/referrals/" % self._path):
+        for d in os.listdir("%s/referrals/" % self.path):
             yield Referral(self, d, 'lookup')
 
     referrals = property(_list_referrals,
@@ -701,8 +702,8 @@ class Port(CFSNode):
 
     def _list_ana_groups(self):
         self._check_self()
-        if os.path.isdir("%s/ana_groups/" % self._path):
-            for d in os.listdir("%s/ana_groups/" % self._path):
+        if os.path.isdir("%s/ana_groups/" % self.path):
+            for d in os.listdir("%s/ana_groups/" % self.path):
                 yield ANAGroup(self, int(d), 'lookup')
 
     ana_groups = property(_list_ana_groups,
@@ -760,7 +761,7 @@ class Referral(CFSNode):
         self.attr_groups = ['addr']
         self.port = port
         self._name = name
-        self._path = "%s/referrals/%s" % (self.port.path, self._name)
+        self._path = "%s/referrals/%s" % (self.port._path, self._name)
         self._create_in_cfs(mode)
 
     def _get_name(self):
@@ -829,7 +830,7 @@ class ANAGroup(CFSNode):
         self.attr_groups = ['ana']
         self._port = port
         self._grpid = grpid
-        self._path = "%s/ana_groups/%d" % (self._port.path, self.grpid)
+        self._path = "%s/ana_groups/%d" % (self._port._path, self.grpid)
         self._create_in_cfs(mode)
 
     def _get_grpid(self):
@@ -892,7 +893,7 @@ class Host(CFSNode):
         super(Host, self).__init__()
 
         self.nqn = nqn
-        self._path = "%s/hosts/%s" % (self.configfs_dir, nqn)
+        self._path = "%s/hosts/%s" % (self.nvmet_prefix, nqn)
         self._create_in_cfs(mode)
 
     @classmethod
