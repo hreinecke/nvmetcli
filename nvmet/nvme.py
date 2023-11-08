@@ -1,5 +1,5 @@
 '''
-Implements access to the NVMe target configfs hierarchy
+Implements access to the NVMe target hierarchy
 
 Copyright (c) 2011-2013 by Datera, Inc.
 Copyright (c) 2011-2014 by Red Hat, Inc.
@@ -37,10 +37,9 @@ class CFSError(Exception):
 
 class CFSNotFound(CFSError):
     '''
-    The underlying configfs object does not exist. Happens when
+    The underlying object does not exist. Happens when
     calling methods of an object that is instantiated but have
-    been deleted from configfs, or when trying to lookup an
-    object that does not exist.
+    been deleted, or when trying to lookup an object that does not exist.
     '''
     pass
 
@@ -66,7 +65,7 @@ class CFSNode(object):
 
     def _create_in_cfs(self, mode):
         '''
-        Creates the configFS node if it does not already exist, depending on
+        Creates the node if it does not already exist, depending on
         the mode.
         any -> makes sure it exists, also works if the node already does exist
         lookup -> make sure it does NOT exist
@@ -75,17 +74,17 @@ class CFSNode(object):
         if mode not in ['any', 'lookup', 'create']:
             raise CFSError("Invalid mode: %s" % mode)
         if self.exists and mode == 'create':
-            raise CFSError("This %s already exists in configFS" %
+            raise CFSError("This %s already exists" %
                            self.__class__.__name__)
         elif not self.exists and mode == 'lookup':
-            raise CFSNotFound("No such %s in configfs: %s" %
+            raise CFSNotFound("No such %s: %s" %
                               (self.__class__.__name__, self._path))
 
         if not self.exists:
             try:
                 os.mkdir(self.path)
             except:
-                raise CFSError("Could not create %s in configFS" %
+                raise CFSError("Could not create %s" %
                                self.__class__.__name__)
         self.get_enable()
 
@@ -94,7 +93,7 @@ class CFSNode(object):
 
     def _check_self(self):
         if not self.exists:
-            raise CFSNotFound("This %s does not exist in configFS" %
+            raise CFSNotFound("This %s does not exist" %
                               self.__class__.__name__)
 
     def list_attrs(self, group, writable=None):
@@ -129,7 +128,7 @@ class CFSNode(object):
     def set_attr(self, group, attribute, value):
         '''
         Sets the value of a named attribute.
-        The attribute must exist in configFS.
+        The attribute must exist.
         @param group: The attribute group
         @param attribute: The attribute's name.
         @param value: The attribute's value.
@@ -193,18 +192,17 @@ class CFSNode(object):
 
     def delete(self):
         '''
-        If the underlying configFS object does not exist, this method does
-        nothing. If the underlying configFS object exists, this method attempts
-        to delete it.
+        If the underlying object does not exist, this method does nothing.
+        If the underlying object exists, this method attempts to delete it.
         '''
         if self.exists:
             os.rmdir(self.path)
 
     path = property(_get_path,
-                    doc="Get the configFS object path.")
+                    doc="Get the full object path.")
     exists = property(_exists,
-            doc="Is True as long as the underlying configFS object exists. "
-                      + "If the underlying configFS objects gets deleted "
+            doc="Is True as long as the underlying object exists. "
+                      + "If the underlying objects gets deleted "
                       + "either by calling the delete() method, or by any "
                       + "other means, it will be False.")
 
@@ -405,7 +403,7 @@ class Root(CFSNode):
 
 class Subsystem(CFSNode):
     '''
-    This is an interface to a NVMe Subsystem in configFS.
+    This is an interface to a NVMe Subsystem.
     A Subsystem is identified by its NQN.
     '''
 
@@ -418,10 +416,10 @@ class Subsystem(CFSNode):
             If no NQN is specified, one will be generated.
         @type nqn: string
         @param mode:An optional string containing the object creation mode:
-            - I{'any'} means the configFS object will be either looked up
+            - I{'any'} means the object will be either looked up
               or created.
-            - I{'lookup'} means the object MUST already exist configFS.
-            - I{'create'} means the object must NOT already exist in configFS.
+            - I{'lookup'} means the object MUST already exist.
+            - I{'create'} means the object must NOT already exist.
         @type mode:string
         @return: A Subsystem object.
         '''
@@ -478,7 +476,7 @@ class Subsystem(CFSNode):
             os.symlink("%s%s/hosts/%s" % (self.configfs_dir, self.nvmet_prefix, nqn),
                        "%s/allowed_hosts/%s" % (self.path, nqn))
         except Exception as e:
-            raise CFSError("Could not symlink %s in configFS: %s" % (nqn, e))
+            raise CFSError("Could not enable access to host %s: %s" % (nqn, e))
 
     def remove_allowed_host(self, nqn):
         '''
@@ -487,7 +485,7 @@ class Subsystem(CFSNode):
         try:
             os.unlink("%s/allowed_hosts/%s" % (self.path, nqn))
         except Exception as e:
-            raise CFSError("Could not unlink %s in configFS: %s" % (nqn, e))
+            raise CFSError("Could not disable access to %s: %s" % (nqn, e))
 
     @classmethod
     def setup(cls, t, err_func):
@@ -524,7 +522,7 @@ class Subsystem(CFSNode):
 
 class Namespace(CFSNode):
     '''
-    This is an interface to a NVMe Namespace in configFS.
+    This is an interface to a NVMe Namespace.
     A Namespace is identified by its parent Subsystem and Namespace ID.
     '''
 
@@ -540,10 +538,10 @@ class Namespace(CFSNode):
             If no nsid is specified, the next free one will be used.
         @type nsid: int
         @param mode:An optional string containing the object creation mode:
-            - I{'any'} means the configFS object will be either looked up
+            - I{'any'} means the object will be either looked up
               or created.
-            - I{'lookup'} means the object MUST already exist configFS.
-            - I{'create'} means the object must NOT already exist in configFS.
+            - I{'lookup'} means the object MUST already exist.
+            - I{'create'} means the object must NOT already exist.
         @type mode:string
         @return: A Namespace object.
         '''
@@ -632,7 +630,7 @@ class Namespace(CFSNode):
 
 class Port(CFSNode):
     '''
-    This is an interface to a NVMe Port in configFS.
+    This is an interface to a NVMe Port.
     '''
 
     MAX_PORTID = 8192
@@ -668,7 +666,7 @@ class Port(CFSNode):
             os.symlink("%s%s/subsystems/%s" % (self.configfs_dir, self.nvmet_prefix, nqn),
                        "%s/subsystems/%s" % (self.path, nqn))
         except Exception as e:
-            raise CFSError("Could not symlink %s in configFS: %s" % (nqn, e))
+            raise CFSError("Could not enable access to %s: %s" % (nqn, e))
 
     def remove_subsystem(self, nqn):
         '''
@@ -677,7 +675,7 @@ class Port(CFSNode):
         try:
             os.unlink("%s/subsystems/%s" % (self.path, nqn))
         except Exception as e:
-            raise CFSError("Could not unlink %s in configFS: %s" % (nqn, e))
+            raise CFSError("Could not disable access to %s: %s" % (nqn, e))
 
     def delete(self):
         '''
@@ -746,7 +744,7 @@ class Port(CFSNode):
 
 class Referral(CFSNode):
     '''
-    This is an interface to a NVMe Referral in configFS.
+    This is an interface to a NVMe Referral.
     '''
 
     def __repr__(self):
@@ -797,7 +795,7 @@ class Referral(CFSNode):
 
 class ANAGroup(CFSNode):
     '''
-    This is an interface to a NVMe ANA Group in configFS.
+    This is an interface to a NVMe ANA Group.
     '''
 
     MAX_GRPID = 1024
@@ -871,7 +869,7 @@ class ANAGroup(CFSNode):
 
 class Host(CFSNode):
     '''
-    This is an interface to a NVMe Host in configFS.
+    This is an interface to a NVMe Host.
     A Host is identified by its NQN.
     '''
 
@@ -883,10 +881,10 @@ class Host(CFSNode):
         @param nqn: The Hosts's NQN.
         @type nqn: string
         @param mode:An optional string containing the object creation mode:
-            - I{'any'} means the configFS object will be either looked up
+            - I{'any'} means the object will be either looked up
               or created.
-            - I{'lookup'} means the object MUST already exist configFS.
-            - I{'create'} means the object must NOT already exist in configFS.
+            - I{'lookup'} means the object MUST already exist.
+            - I{'create'} means the object must NOT already exist.
         @type mode:string
         @return: A Host object.
         '''
