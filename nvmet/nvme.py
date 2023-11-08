@@ -626,7 +626,6 @@ class Namespace(CFSNode):
     def dump(self):
         d = super(Namespace, self).dump()
         d['nsid'] = self.nsid
-        d['ana_grpid'] = self.grpid
         return d
 
 
