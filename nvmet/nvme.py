@@ -19,24 +19,29 @@ under the License.
 '''
 
 import os
-import stat
 import uuid
 import json
-from glob import iglob as glob
 from six import iteritems, moves
 from .error import CFSError, CFSNotFound
+from .fs import Filesystem
+from .rpc import RESTapi
 
 DEFAULT_SAVE_FILE = '/etc/nvmet/config.json'
 
+
 class CFSNode(object):
 
-    configfs_dir = '/sys/kernel/config'
     nvmet_prefix = '/nvmet'
 
     def __init__(self):
         self._path = self.nvmet_prefix
         self._enable = None
         self.attr_groups = []
+        if 'NVMET_URI' in os.environ:
+            uri = os.environ['NVMET_URI']
+            self.cfg = RESTapi(uri)
+        else:
+            self.cfg = Filesystem()
 
     def __eq__(self, other):
         return self._path == other._path
@@ -45,7 +50,7 @@ class CFSNode(object):
         return self._path != other._path
 
     def _get_path(self):
-        return f'{self.configfs_dir}/{self._path}'
+        return self._path
 
     def _create_in_cfs(self, mode):
         '''
@@ -66,14 +71,14 @@ class CFSNode(object):
 
         if not self.exists:
             try:
-                os.mkdir(self.path)
+                self.cfg.create(self._path)
             except:
                 raise CFSError("Could not create %s" %
                                self.__class__.__name__)
         self.get_enable()
 
     def _exists(self):
-        return os.path.isdir(self.path)
+        return self.cfg.test(self._path)
 
     def _check_self(self):
         if not self.exists:
@@ -91,9 +96,7 @@ class CFSNode(object):
         '''
         self._check_self()
 
-        names = [os.path.basename(name).split('_', 1)[1]
-                 for name in glob("%s/%s_*" % (self.path, group))
-                     if os.path.isfile(name)]
+        names = self.cfg.attr_names(self._path, group)
 
         if writable is True:
             names = [name for name in names
@@ -106,8 +109,7 @@ class CFSNode(object):
         return names
 
     def _attr_is_writable(self, group, name):
-        s = os.stat("%s/%s_%s" % (self.path, group, name))
-        return s[stat.ST_MODE] & stat.S_IWUSR
+        return self.cfg.test_writable(f'{self._path}/{group}_{name}')
 
     def set_attr(self, group, attribute, value):
         '''
@@ -119,20 +121,13 @@ class CFSNode(object):
         @type value: string
         '''
         self._check_self()
-        path = "%s/%s_%s" % (self.path, str(group), str(attribute))
-
-        if not os.path.isfile(path):
-            raise CFSError("Cannot find attribute: %s" % path)
+        path = "%s/%s_%s" % (self._path, str(group), str(attribute))
 
         if self._enable:
             raise CFSError("Cannot set attribute while %s is enabled" %
                            self.__class__.__name__)
 
-        try:
-            with open(path, 'w') as file_fd:
-                file_fd.write(str(value))
-        except Exception as e:
-            raise CFSError("Cannot set attribute %s: %s" % (path, e))
+        self.cfg.modify(path, value)
 
     def get_attr(self, group, attribute):
         '''
@@ -142,36 +137,27 @@ class CFSNode(object):
         @return: The named attribute's value, as a string.
         '''
         self._check_self()
-        path = "%s/%s_%s" % (self.path, str(group), str(attribute))
-        if not os.path.isfile(path):
-            raise CFSError("Cannot find attribute: %s" % path)
-
-        with open(path, 'r') as file_fd:
-            return file_fd.read().strip()
+        path = "%s/%s_%s" % (self._path, str(group), str(attribute))
+        return self.cfg.fetch(path)
 
     def get_enable(self):
         self._check_self()
-        path = "%s/enable" % self.path
-        if not os.path.isfile(path):
-            return None
+        path = "%s/enable" % self._path
 
-        with open(path, 'r') as file_fd:
-            self._enable = int(file_fd.read().strip())
+        try:
+            self._enable = int(self.cfg.fetch(path))
+        except CFSNotFound:
+            return None
         return self._enable
 
     def set_enable(self, value):
         self._check_self()
-        path = "%s/enable" % self.path
+        path = "%s/enable" % self._path
 
-        if not os.path.isfile(path) or self._enable is None:
-            raise CFSError("Cannot enable %s" % self.path)
+        if self._enable is None:
+            raise CFSError("Cannot enable %s" % self._path)
 
-        try:
-            with open(path, 'w') as file_fd:
-                file_fd.write(str(value))
-        except Exception as e:
-            raise CFSError("Cannot enable %s: %s (%s)" %
-                           (self.path, e, value))
+        self.cfg.modify(path, str(value))
         self._enable = value
 
     def delete(self):
@@ -179,8 +165,7 @@ class CFSNode(object):
         If the underlying object does not exist, this method does nothing.
         If the underlying object exists, this method attempts to delete it.
         '''
-        if self.exists:
-            os.rmdir(self.path)
+        self.cfg.remove(self._path)
 
     path = property(_get_path,
                     doc="Get the full object path.")
@@ -217,12 +202,12 @@ class Root(CFSNode):
     def __init__(self):
         super(Root, self).__init__()
 
-        if not os.path.isdir(self.configfs_dir):
+        if not self.cfg.test(self.nvmet_prefix):
             self._modprobe('nvmet')
 
-        if not os.path.isdir(self.configfs_dir):
+        if not self.cfg.test(self.nvmet_prefix):
             raise CFSError("%s does not exist.  Giving up." %
-                           self.configfs_dir)
+                           self.nvmet_prefix)
 
         self._path = self.nvmet_prefix
         self._create_in_cfs('lookup')
@@ -246,7 +231,7 @@ class Root(CFSNode):
     def _list_subsystems(self):
         self._check_self()
 
-        for d in os.listdir("%s/subsystems/" % self.path):
+        for d in self.cfg.namelist(self._path, 'subsystems'):
             yield Subsystem(d, 'lookup')
 
     subsystems = property(_list_subsystems,
@@ -255,7 +240,7 @@ class Root(CFSNode):
     def _list_ports(self):
         self._check_self()
 
-        for d in os.listdir("%s/ports/" % self.path):
+        for d in self.cfg.namelist(self._path, 'ports'):
             yield Port(d, 'lookup')
 
     ports = property(_list_ports,
@@ -264,7 +249,7 @@ class Root(CFSNode):
     def _list_hosts(self):
         self._check_self()
 
-        for h in os.listdir("%s/hosts/" % self.path):
+        for h in self.cfg.namelist(self._path, 'hosts'):
             yield Host(h, 'lookup')
 
     hosts = property(_list_hosts,
@@ -439,15 +424,14 @@ class Subsystem(CFSNode):
 
     def _list_namespaces(self):
         self._check_self()
-        for d in os.listdir("%s/namespaces/" % self.path):
+        for d in self.cfg.namelist(self._path, 'namespaces'):
             yield Namespace(self, int(d), 'lookup')
 
     namespaces = property(_list_namespaces,
                           doc="Get the list of Namespaces for the Subsystem.")
 
     def _list_allowed_hosts(self):
-        return [os.path.basename(name)
-                for name in os.listdir("%s/allowed_hosts/" % self.path)]
+        return self.cfg.fetch_list(self._path, 'allowed_hosts')
 
     allowed_hosts = property(_list_allowed_hosts,
                              doc="Get the list of Allowed Hosts for the Subsystem.")
@@ -456,18 +440,19 @@ class Subsystem(CFSNode):
         '''
         Enable access for the host identified by I{nqn} to the Subsystem
         '''
+        src = f'{self.nvmet_prefix}/hosts/{nqn}'
+        dst = f'{self._path}/allowed_hosts/{nqn}'
         try:
-            os.symlink("%s%s/hosts/%s" % (self.configfs_dir, self.nvmet_prefix, nqn),
-                       "%s/allowed_hosts/%s" % (self.path, nqn))
+            self.cfg.link(src, dst)
         except Exception as e:
-            raise CFSError("Could not enable access to host %s: %s" % (nqn, e))
+            raise CFSError(f'Could not enable access from {src} to {dst}: {e}')
 
     def remove_allowed_host(self, nqn):
         '''
         Disable access for the host identified by I{nqn} to the Subsystem
         '''
         try:
-            os.unlink("%s/allowed_hosts/%s" % (self.path, nqn))
+            self.cfg.unlink(f'{self._path}/allowed_hosts/{nqn}')
         except Exception as e:
             raise CFSError("Could not disable access to %s: %s" % (nqn, e))
 
@@ -565,18 +550,15 @@ class Namespace(CFSNode):
     def _get_grpid(self):
         self._check_self()
         _grpid = 0
-        path = "%s/ana_grpid" % self.path
-        if os.path.isfile(path):
-            with open(path, 'r') as file_fd:
-                _grpid = int(file_fd.read().strip())
+        path = "%s/ana_grpid" % self._path
+        if self.cfg.test_attr(path):
+            _grpid = int(self.cfg.fetch(path))
         return _grpid
 
     def set_grpid(self, grpid):
         self._check_self()
         path = "%s/ana_grpid" % self.path
-        if os.path.isfile(path):
-            with open(path, 'w') as file_fd:
-                file_fd.write(str(grpid))
+        self.cfg.modify(path, str(grpid))
 
     grpid = property(_get_grpid, doc="Get the ANA Group ID.")
 
@@ -636,8 +618,7 @@ class Port(CFSNode):
     portid = property(_get_portid, doc="Get the Port ID as an int.")
 
     def _list_subsystems(self):
-        return [os.path.basename(name)
-                for name in os.listdir("%s/subsystems/" % self.path)]
+        return self.cfg.fetch_list(self._path, 'subsystems')
 
     subsystems = property(_list_subsystems,
                           doc="Get the list of Subsystem for this Port.")
@@ -647,8 +628,8 @@ class Port(CFSNode):
         Enable access to the Subsystem identified by I{nqn} through this Port.
         '''
         try:
-            os.symlink("%s%s/subsystems/%s" % (self.configfs_dir, self.nvmet_prefix, nqn),
-                       "%s/subsystems/%s" % (self.path, nqn))
+            self.cfg.link(f'{self.nvmet_prefix}/subsystems/{nqn}',
+                          f'{self._path}/subsystems/{nqn}')
         except Exception as e:
             raise CFSError("Could not enable access to %s: %s" % (nqn, e))
 
@@ -657,7 +638,7 @@ class Port(CFSNode):
         Disable access to the Subsystem identified by I{nqn} through this Port.
         '''
         try:
-            os.unlink("%s/subsystems/%s" % (self.path, nqn))
+            self.cfg.unlink("%s/subsystems/%s" % (self._path, nqn))
         except Exception as e:
             raise CFSError("Could not disable access to %s: %s" % (nqn, e))
 
@@ -676,7 +657,7 @@ class Port(CFSNode):
 
     def _list_referrals(self):
         self._check_self()
-        for d in os.listdir("%s/referrals/" % self.path):
+        for d in self.cfg.namelist(self._path, 'referrals'):
             yield Referral(self, d, 'lookup')
 
     referrals = property(_list_referrals,
@@ -684,8 +665,8 @@ class Port(CFSNode):
 
     def _list_ana_groups(self):
         self._check_self()
-        if os.path.isdir("%s/ana_groups/" % self.path):
-            for d in os.listdir("%s/ana_groups/" % self.path):
+        if self.cfg.test("%s/ana_groups" % self._path):
+            for d in self.cfg.namelist(self._path, 'ana_groups'):
                 yield ANAGroup(self, int(d), 'lookup')
 
     ana_groups = property(_list_ana_groups,
@@ -790,7 +771,7 @@ class ANAGroup(CFSNode):
     def __init__(self, port, grpid, mode='any'):
         super(ANAGroup, self).__init__()
 
-        if not os.path.isdir("%s/ana_groups" % port.path):
+        if not self.cfg.test("%s/ana_groups" % port._path):
             raise CFSError("ANA not supported")
 
         if grpid is None:

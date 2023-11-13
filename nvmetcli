@@ -714,7 +714,7 @@ funcs = dict(save=save, restore=restore, clear=clear, ls=ls)
 
 
 def main():
-    if os.geteuid() != 0:
+    if 'NVMET_URI' not in os.environ and os.geteuid() != 0:
         print("%s: must run as root." % sys.argv[0], file=sys.stderr)
         sys.exit(-1)
 
