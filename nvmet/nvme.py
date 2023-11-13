@@ -24,25 +24,9 @@ import uuid
 import json
 from glob import iglob as glob
 from six import iteritems, moves
+from .error import CFSError, CFSNotFound
 
 DEFAULT_SAVE_FILE = '/etc/nvmet/config.json'
-
-
-class CFSError(Exception):
-    '''
-    Generic slib error.
-    '''
-    pass
-
-
-class CFSNotFound(CFSError):
-    '''
-    The underlying object does not exist. Happens when
-    calling methods of an object that is instantiated but have
-    been deleted, or when trying to lookup an object that does not exist.
-    '''
-    pass
-
 
 class CFSNode(object):
 
