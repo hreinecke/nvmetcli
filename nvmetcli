@@ -27,6 +27,7 @@ import nvmet as nvme
 import errno
 from string import hexdigits
 import uuid
+import argparse
 
 
 def ngiud_set(nguid):
@@ -714,26 +715,25 @@ funcs = dict(save=save, restore=restore, clear=clear, ls=ls)
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('cmd', help='Function to execute',
+                        choices=['ls', 'save', 'restore'], nargs='?')
+    parser.add_argument('file', help='Configuration file', nargs='?')
+
     if 'NVMET_URI' not in os.environ and os.geteuid() != 0:
         print("%s: must run as root." % sys.argv[0], file=sys.stderr)
         sys.exit(-1)
 
-    if len(sys.argv) > 3:
-        usage()
-
-    if len(sys.argv) == 2 or len(sys.argv) == 3:
-        if sys.argv[1] == "--help":
+    args = parser.parse_args()
+    if args.file:
+        if args.cmd == 'ls':
             usage()
+        savefile = args.file
+    else:
+        savefile = None
 
-        if sys.argv[1] not in funcs.keys():
-            usage()
-
-        if len(sys.argv) == 3:
-            savefile = sys.argv[2]
-        else:
-            savefile = None
-
-        funcs[sys.argv[1]](savefile)
+    if args.cmd in funcs.keys():
+        funcs[args.cmd](savefile)
         return
 
     try:

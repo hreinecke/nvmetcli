@@ -19,6 +19,7 @@ under the License.
 '''
 
 import os
+import stat
 import uuid
 import json
 from six import iteritems, moves
