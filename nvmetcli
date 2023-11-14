@@ -719,12 +719,17 @@ def main():
     parser.add_argument('cmd', help='Function to execute',
                         choices=['ls', 'save', 'restore'], nargs='?')
     parser.add_argument('file', help='Configuration file', nargs='?')
+    parser.add_argument('--remote', help='URI for remote configuration', metavar='NVMET_URI')
+
+    args = parser.parse_args()
+    if args.remote:
+        print(f'Using {args.remote}')
+        os.environ['NVMET_URI'] = args.remote
 
     if 'NVMET_URI' not in os.environ and os.geteuid() != 0:
         print("%s: must run as root." % sys.argv[0], file=sys.stderr)
         sys.exit(-1)
 
-    args = parser.parse_args()
     if args.file:
         if args.cmd == 'ls':
             usage()

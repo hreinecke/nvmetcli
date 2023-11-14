@@ -8,9 +8,7 @@ nvmetcli - Configure NVMe-over-Fabrics Target.
 USAGE
 ------
 [verse]
-nvmetcli
-nvmetcli clear
-nvmetcli restore [filename.json]
+nvmetcli [-h] [--remote URI] [<cmds>] [filename.json]
 
 DESCRIPTION
 -----------
