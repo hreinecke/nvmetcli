@@ -586,8 +586,6 @@ class Namespace(CFSNode):
             return
 
         ns._setup_attrs(n, err_func)
-        if 'ana_grpid' in n:
-            ns.set_grpid(int(n['ana_grpid']))
 
     def dump(self):
         d = super(Namespace, self).dump()
