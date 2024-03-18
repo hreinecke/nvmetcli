@@ -47,7 +47,7 @@ class Filesystem(object):
         cfs_path = f'{self.configfs_dir}{path}'
 
         if not os.path.isfile(cfs_path):
-            raise CFSNotFount(f'Cannot find attribute: {cfs_path}')
+            raise CFSNotFound(f'Cannot find attribute: {cfs_path}')
         try:
             with open(f'{self.configfs_dir}{path}', 'w') as fd:
                 fd.write(str(value))
