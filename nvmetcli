@@ -717,7 +717,7 @@ funcs = dict(save=save, restore=restore, clear=clear, ls=ls)
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('cmd', help='Function to execute',
-                        choices=['ls', 'save', 'restore'], nargs='?')
+                        choices=['ls', 'save', 'restore', 'clear'], nargs='?')
     parser.add_argument('file', help='Configuration file', nargs='?')
     parser.add_argument('--remote', help='URI for remote configuration', metavar='NVMET_URI')
 
