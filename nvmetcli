@@ -94,9 +94,17 @@ class UINode(configshell.node.ConfigNode):
 
 
 class UIRootNode(UINode):
+    ui_desc_discovery = {
+        'nqn': ('string', 'Discovery NQN'),
+    }
     def __init__(self, shell):
         UINode.__init__(self, '/', parent=None, cfnode=nvme.Root(),
                         shell=shell)
+
+    def summary(self):
+        info = []
+        info.append("discovery=" + self.cfnode.get_attr("discovery", "nqn"))
+        return (", ".join(info), True)
 
     def refresh(self):
         self._children = set([])
