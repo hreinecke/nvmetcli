@@ -234,6 +234,7 @@ class Root(CFSNode):
     def __init__(self):
         super(Root, self).__init__()
 
+        self.attr_groups = ['discovery']
         if not os.path.isdir(self.configfs_dir):
             self._modprobe('nvmet')
 
