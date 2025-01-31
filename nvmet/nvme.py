@@ -50,6 +50,8 @@ class CFSNode(object):
     configfs_dir = '/sys/kernel/config/nvmet'
 
     def __init__(self):
+        if os.environ.get("NVMET_DIR"):
+            self.configfs_dir = os.environ.get("NVMET_DIR")
         self._path = self.configfs_dir
         self._enable = None
         self.attr_groups = []
